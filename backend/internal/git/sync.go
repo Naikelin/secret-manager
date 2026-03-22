@@ -1,0 +1,68 @@
+package git
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/yourorg/secret-manager/pkg/logger"
+)
+
+// EnsureRepo ensures the repository exists locally
+// Clones if it doesn't exist, pulls if it does
+func (c *GitClient) EnsureRepo() error {
+	// Check if repo directory exists
+	_, err := os.Stat(c.repoPath)
+	if os.IsNotExist(err) {
+		// Repository doesn't exist - clone it
+		logger.Info("Repository not found locally, cloning", "path", c.repoPath)
+		return c.Clone()
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check repository path: %w", err)
+	}
+
+	// Repository exists - try to open it
+	logger.Info("Opening existing repository", "path", c.repoPath)
+	repo, err := git.PlainOpen(c.repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to open repository at %s (try deleting and re-cloning): %w", c.repoPath, err)
+	}
+
+	c.repo = repo
+
+	// Verify we're on the correct branch
+	head, err := repo.Head()
+	if err != nil {
+		return fmt.Errorf("failed to get HEAD: %w", err)
+	}
+
+	expectedRef := plumbing.NewBranchReferenceName(c.branch)
+	if head.Name() != expectedRef {
+		logger.Warn("Repository on different branch", "current", head.Name().Short(), "expected", c.branch)
+		// Try to checkout the correct branch
+		w, err := repo.Worktree()
+		if err != nil {
+			return fmt.Errorf("failed to get worktree: %w", err)
+		}
+
+		err = w.Checkout(&git.CheckoutOptions{
+			Branch: expectedRef,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to checkout branch %s: %w", c.branch, err)
+		}
+		logger.Info("Checked out branch", "branch", c.branch)
+	}
+
+	// Pull latest changes
+	return c.Pull()
+}
+
+// GetFilePath returns the standardized path for a secret file in the repository
+// Format: namespaces/{namespace}/secrets/{secretName}.yaml
+func (c *GitClient) GetFilePath(namespace, secretName string) string {
+	return filepath.Join("namespaces", namespace, "secrets", fmt.Sprintf("%s.yaml", secretName))
+}

@@ -1,0 +1,41 @@
+# Backend
+/backend/bin/
+/backend/tmp/
+/backend/.env
+
+# Frontend
+/frontend/node_modules/
+/frontend/.next/
+/frontend/out/
+/frontend/.env.local
+/frontend/.env
+
+# Development data
+dev-data/*
+!dev-data/.gitkeep
+
+# Age keys (security)
+*.txt
+age-key.*
+
+# SOPS config (generated)
+.sops.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.key
+*.pem
+age.txt
+*.agekey
+
+# Logs
+*.log

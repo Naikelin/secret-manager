@@ -1,0 +1,99 @@
+# version: '3.9' # Obsolete in Docker Compose v2+
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: secretmanager-postgres
+    environment:
+      POSTGRES_DB: secretmanager
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: devpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d secretmanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - secretmanager
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: secretmanager-backend
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://dev:devpass@postgres:5432/secretmanager?sslmode=disable
+      PORT: 8080
+      LOG_LEVEL: debug
+      AUTH_PROVIDER: mock
+      JWT_SECRET: dev-secret-change-in-production
+      GIT_REPO_PATH: /data/secrets-repo
+      SOPS_AGE_KEY_FILE: /keys/age.txt
+      GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_AUTH_TYPE: ${GIT_AUTH_TYPE:-ssh}
+      GIT_SSH_KEY_PATH: /app/.ssh/id_rsa
+      GIT_AUTHOR_NAME: Secret Manager Dev
+      GIT_AUTHOR_EMAIL: dev@secret-manager.local
+      # SOPS configuration
+      SOPS_ENABLED: "true"
+      SOPS_ENCRYPT_TYPE: age
+      SOPS_AGE_KEY_PATH: /app/.age/keys.txt
+    volumes:
+      - ./backend:/app
+      - ./dev-data/secrets-repo:/data/secrets-repo
+      - ./dev-data/age-key.txt:/keys/age.txt:ro
+      - ./dev-data/age-keys:/app/.age:ro
+      - ./dev-data/ssh-keys:/app/.ssh:ro
+      - backend_cache:/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - secretmanager
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: secretmanager-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: dev-secret-change-in-production
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    networks:
+      - secretmanager
+
+  # oauth-mock:
+  #   image: ghusta/oauth2-mock-server:latest
+  #   container_name: secretmanager-oauth-mock
+  #   ports:
+  #     - "9000:8080"
+  #   environment:
+  #     CLIENT_ID: dev-client
+  #     CLIENT_SECRET: dev-secret
+  #     REDIRECT_URI: http://localhost:3000/api/auth/callback
+  #   networks:
+  #     - secretmanager
+
+volumes:
+  postgres_data:
+  backend_cache:
+
+networks:
+  secretmanager:
+    driver: bridge
