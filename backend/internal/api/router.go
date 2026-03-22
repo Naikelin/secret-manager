@@ -12,6 +12,7 @@ import (
 	"github.com/yourorg/secret-manager/internal/config"
 	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/git"
+	"github.com/yourorg/secret-manager/internal/k8s"
 	mw "github.com/yourorg/secret-manager/internal/middleware"
 	"github.com/yourorg/secret-manager/internal/sops"
 	"gorm.io/gorm"
@@ -66,6 +67,15 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 
 	syncHandlers := NewSyncHandlers(db, fluxClient)
 
+	// Initialize K8s client for K8s secret handlers
+	k8sClient, err := initK8sClient(cfg)
+	if err != nil {
+		// Log error but don't fail - K8s operations will report cluster as unavailable
+		// logger.Warn("Failed to initialize K8s client", "error", err)
+	}
+
+	k8sSecretHandlers := NewK8sSecretHandlers(db, k8sClient)
+
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
 		// Auth routes (public)
@@ -113,6 +123,12 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 
 			// FluxCD sync status - require read permission
 			r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/namespaces/{namespace}/sync-status", syncHandlers.GetSyncStatus)
+
+			// K8s secrets (read-only) - require read permission
+			r.Route("/namespaces/{namespace}/k8s-secrets", func(r chi.Router) {
+				r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/", k8sSecretHandlers.ListK8sSecrets)
+				r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/{name}", k8sSecretHandlers.GetK8sSecret)
+			})
 		})
 	})
 
@@ -174,4 +190,14 @@ func initFluxClient(cfg *config.Config) (FluxClientInterface, error) {
 	}
 
 	return fluxClient, nil
+}
+
+// initK8sClient initializes the Kubernetes client from config
+func initK8sClient(cfg *config.Config) (*k8s.K8sClient, error) {
+	k8sClient, err := k8s.NewK8sClient(cfg.K8sKubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create K8s client: %w", err)
+	}
+
+	return k8sClient, nil
 }
