@@ -105,6 +105,21 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	`).Error
 	require.NoError(t, err)
 
+	err = db.Exec(`
+		CREATE TABLE drift_events (
+			id TEXT PRIMARY KEY,
+			secret_name TEXT NOT NULL,
+			namespace_id TEXT NOT NULL,
+			detected_at DATETIME NOT NULL,
+			resolved_at DATETIME,
+			git_version TEXT,
+			k8s_version TEXT,
+			diff TEXT,
+			created_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
 	return db
 }
 

@@ -29,6 +29,7 @@ func init() {
 type MockGitClient struct {
 	EnsureRepoFunc  func() error
 	WriteFileFunc   func(path string, content []byte) error
+	ReadFileFunc    func(path string) ([]byte, error)
 	CommitFunc      func(message, authorName string, files []string) (string, error)
 	PushFunc        func() error
 	FileExistsFunc  func(path string) (bool, error)
@@ -48,6 +49,13 @@ func (m *MockGitClient) WriteFile(path string, content []byte) error {
 		return m.WriteFileFunc(path, content)
 	}
 	return nil
+}
+
+func (m *MockGitClient) ReadFile(path string) ([]byte, error) {
+	if m.ReadFileFunc != nil {
+		return m.ReadFileFunc(path)
+	}
+	return nil, fmt.Errorf("file not found")
 }
 
 func (m *MockGitClient) Commit(message, authorName string, files []string) (string, error) {

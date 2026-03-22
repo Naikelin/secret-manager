@@ -22,6 +22,7 @@ import (
 type GitClientInterface interface {
 	EnsureRepo() error
 	WriteFile(path string, content []byte) error
+	ReadFile(path string) ([]byte, error)
 	Commit(message, authorName string, files []string) (string, error)
 	Push() error
 	FileExists(path string) (bool, error)

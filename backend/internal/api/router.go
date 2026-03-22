@@ -10,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/uuid"
 	"github.com/yourorg/secret-manager/internal/config"
+	"github.com/yourorg/secret-manager/internal/drift"
 	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/git"
 	"github.com/yourorg/secret-manager/internal/k8s"
@@ -76,6 +77,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 
 	k8sSecretHandlers := NewK8sSecretHandlers(db, k8sClient)
 
+	// Initialize drift detector for drift handlers
+	var driftDetector *drift.DriftDetector
+	if k8sClient != nil && gitClient != nil && sopsClient != nil {
+		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	}
+	driftHandlers := NewDriftHandlers(db, driftDetector)
+
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
 		// Auth routes (public)
@@ -129,6 +137,10 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 				r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/", k8sSecretHandlers.ListK8sSecrets)
 				r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/{name}", k8sSecretHandlers.GetK8sSecret)
 			})
+
+			// Drift detection - require read permission
+			r.With(mw.RequireRead(db, getNamespaceFromParam)).Post("/namespaces/{namespace}/drift-check", driftHandlers.TriggerDriftCheck)
+			r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/namespaces/{namespace}/drift-events", driftHandlers.ListDriftEvents)
 		})
 	})
 

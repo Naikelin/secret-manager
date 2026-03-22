@@ -241,3 +241,20 @@ func (c *GitClient) WriteFile(path string, content []byte) error {
 	logger.Debug("Wrote file to repository", "path", path, "size", len(content))
 	return nil
 }
+
+// ReadFile reads content from a file in the repository working tree
+func (c *GitClient) ReadFile(path string) ([]byte, error) {
+	fullPath := filepath.Join(c.repoPath, path)
+
+	// Read file
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("file not found: %s", path)
+		}
+		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
+	}
+
+	logger.Debug("Read file from repository", "path", path, "size", len(content))
+	return content, nil
+}
