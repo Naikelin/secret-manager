@@ -10,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/uuid"
 	"github.com/yourorg/secret-manager/internal/config"
+	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/git"
 	mw "github.com/yourorg/secret-manager/internal/middleware"
 	"github.com/yourorg/secret-manager/internal/sops"
@@ -56,6 +57,15 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 
 	publishHandlers := NewPublishHandlers(db, gitClient, sopsClient)
 
+	// Initialize FluxCD client for sync handlers
+	fluxClient, err := initFluxClient(cfg)
+	if err != nil {
+		// Log error but don't fail - sync operations will report FluxCD as unavailable
+		// logger.Warn("Failed to initialize FluxCD client", "error", err)
+	}
+
+	syncHandlers := NewSyncHandlers(db, fluxClient)
+
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
 		// Auth routes (public)
@@ -100,6 +110,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 					r.With(mw.RequireDelete(db, getNamespaceFromParam)).Post("/unpublish", publishHandlers.UnpublishSecret)
 				})
 			})
+
+			// FluxCD sync status - require read permission
+			r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/namespaces/{namespace}/sync-status", syncHandlers.GetSyncStatus)
 		})
 	})
 
@@ -151,4 +164,14 @@ func initSOPSClient(cfg *config.Config) (SOPSClientInterface, error) {
 	}
 
 	return sopsClient, nil
+}
+
+// initFluxClient initializes the FluxCD client from config
+func initFluxClient(cfg *config.Config) (FluxClientInterface, error) {
+	fluxClient, err := flux.NewFluxClient(cfg.K8sKubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create FluxCD client: %w", err)
+	}
+
+	return fluxClient, nil
 }
