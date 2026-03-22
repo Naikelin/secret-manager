@@ -90,6 +90,21 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	`).Error
 	require.NoError(t, err)
 
+	err = db.Exec(`
+		CREATE TABLE audit_logs (
+			id TEXT PRIMARY KEY,
+			user_id TEXT,
+			action_type TEXT NOT NULL,
+			resource_type TEXT NOT NULL,
+			resource_name TEXT NOT NULL,
+			namespace_id TEXT,
+			timestamp DATETIME,
+			metadata TEXT,
+			created_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
 	return db
 }
 

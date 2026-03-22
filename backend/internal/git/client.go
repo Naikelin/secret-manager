@@ -57,6 +57,11 @@ func (c *GitClient) SetAuthor(name, email string) {
 	}
 }
 
+// RepoPath returns the local repository path
+func (c *GitClient) RepoPath() string {
+	return c.repoPath
+}
+
 // Clone clones the repository to repoPath
 func (c *GitClient) Clone() error {
 	logger.Info("Cloning repository", "url", c.repoURL, "branch", c.branch, "path", c.repoPath)
