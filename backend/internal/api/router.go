@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,6 +16,7 @@ import (
 	"github.com/yourorg/secret-manager/internal/git"
 	"github.com/yourorg/secret-manager/internal/k8s"
 	mw "github.com/yourorg/secret-manager/internal/middleware"
+	"github.com/yourorg/secret-manager/internal/notifications"
 	"github.com/yourorg/secret-manager/internal/sops"
 	"gorm.io/gorm"
 )
@@ -88,7 +90,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 	// Initialize drift detector for drift handlers
 	var driftDetector *drift.DriftDetector
 	if k8sClient != nil && gitClient != nil && sopsClient != nil {
-		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+		// Initialize webhook client
+		webhookURL := os.Getenv("DRIFT_WEBHOOK_URL")
+		webhookClient := notifications.NewWebhookClient(webhookURL)
+		if webhookClient != nil {
+			fmt.Printf("[INIT] Webhook notifications enabled for drift detection\n")
+		}
+
+		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient)
 	}
 	driftHandlers := NewDriftHandlers(db, driftDetector)
 	driftResolutionHandlers := NewDriftResolutionHandlers(db, driftDetector)
@@ -159,6 +168,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 			// Drift detection - require read permission
 			r.With(mw.RequireRead(db, getNamespaceFromParam)).Post("/namespaces/{namespace}/drift-check", driftHandlers.TriggerDriftCheck)
 			r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/namespaces/{namespace}/drift-events", driftHandlers.ListDriftEvents)
+
+			// Admin-only endpoint to trigger drift check for all namespaces
+			r.Route("/drift", func(r chi.Router) {
+				r.Post("/check-all", driftHandlers.CheckAllNamespaces)
+			})
 
 			// Drift resolution - require admin permission on the drift event's namespace
 			// Helper to extract namespace ID from drift event

@@ -52,7 +52,7 @@ type DriftEvent struct {
 	Diff             datatypes.JSON `gorm:"type:jsonb;not null" json:"diff"`
 	ResolvedAt       *time.Time     `json:"resolved_at,omitempty"`
 	ResolvedBy       *uuid.UUID     `gorm:"type:uuid" json:"resolved_by,omitempty"`
-	ResolutionAction string         `gorm:"check:resolution_action IN ('sync_from_git', 'import_to_git', 'ignore')" json:"resolution_action,omitempty"`
+	ResolutionAction *string        `gorm:"default:null;check:resolution_action IS NULL OR resolution_action IN ('sync_from_git', 'import_to_git', 'ignore')" json:"resolution_action,omitempty"`
 	CreatedAt        time.Time      `json:"created_at"`
 
 	// Relationships
@@ -63,6 +63,10 @@ type DriftEvent struct {
 func (de *DriftEvent) BeforeCreate(tx *gorm.DB) error {
 	if de.ID == uuid.Nil {
 		de.ID = uuid.New()
+	}
+	// Ensure resolution_action is NULL, not empty string
+	if de.ResolutionAction != nil && *de.ResolutionAction == "" {
+		de.ResolutionAction = nil
 	}
 	return nil
 }

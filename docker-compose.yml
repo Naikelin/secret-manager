@@ -45,13 +45,20 @@ services:
       SOPS_ENABLED: "true"
       SOPS_ENCRYPT_TYPE: age
       SOPS_AGE_KEY_PATH: /app/.age/keys.txt
+      # Kubernetes configuration
+      K8S_KUBECONFIG: /app/.kube/config
+      DRIFT_CHECK_INTERVAL: 5m
+      DRIFT_WEBHOOK_URL: ${DRIFT_WEBHOOK_URL:-}
     volumes:
       - ./backend:/app
       - ./dev-data/secrets-repo:/data/secrets-repo
       - ./dev-data/age-key.txt:/keys/age.txt:ro
       - ./dev-data/age-keys:/app/.age:ro
       - ./dev-data/ssh-keys:/app/.ssh:ro
+      - ~/.kube:/app/.kube:ro
       - backend_cache:/go/pkg/mod
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

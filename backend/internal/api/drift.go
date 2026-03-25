@@ -267,3 +267,45 @@ func extractDiffSummary(diffData map[string]interface{}) string {
 
 	return "Drift detected"
 }
+
+// CheckAllNamespaces handles POST /api/v1/drift/check-all
+// Admin-only endpoint to manually trigger drift check across all namespaces
+func (h *DriftHandlers) CheckAllNamespaces(w http.ResponseWriter, r *http.Request) {
+	var namespaces []models.Namespace
+	if err := h.db.Find(&namespaces).Error; err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to fetch namespaces")
+		return
+	}
+
+	type NamespaceResult struct {
+		NamespaceID   string `json:"namespace_id"`
+		NamespaceName string `json:"namespace_name"`
+		DriftCount    int    `json:"drift_count"`
+		Error         string `json:"error,omitempty"`
+	}
+
+	results := []NamespaceResult{}
+
+	for _, ns := range namespaces {
+		events, err := h.driftDetector.DetectDriftForNamespace(ns.ID)
+
+		result := NamespaceResult{
+			NamespaceID:   ns.ID.String(),
+			NamespaceName: ns.Name,
+		}
+
+		if err != nil {
+			result.Error = err.Error()
+		} else {
+			result.DriftCount = len(events)
+		}
+
+		results = append(results, result)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_namespaces": len(namespaces),
+		"results":          results,
+	})
+}

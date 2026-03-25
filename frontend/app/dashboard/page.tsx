@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser, logout, isAuthenticated } from '@/lib/api';
+import DriftWidget from '@/components/DriftWidget';
 
 interface User {
   id: string;
@@ -52,28 +53,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
-      {/* Navigation Bar */}
-      <nav className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Secret Manager
-              </h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">{user.email}</span>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 rounded-md hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
@@ -127,7 +106,7 @@ export default function DashboardPage() {
           <h3 className="text-2xl font-bold text-gray-900 mb-4">Quick Actions</h3>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <a 
             href="/secrets" 
             className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
@@ -161,22 +140,6 @@ export default function DashboardPage() {
           </a>
 
           <a 
-            href="/drift" 
-            className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-yellow-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-3xl">⚠️</span>
-              <h4 className="text-lg font-semibold text-gray-900">Drift Detection</h4>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">
-              Monitor and resolve configuration drift
-            </p>
-            <span className="text-sm text-yellow-700 font-medium group-hover:underline">
-              View Drift Events →
-            </span>
-          </a>
-
-          <a 
             href="/audit" 
             className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
           >
@@ -191,6 +154,15 @@ export default function DashboardPage() {
               View Audit Logs →
             </span>
           </a>
+        </div>
+
+        {/* Drift Detection Widget */}
+        <div className="mb-8">
+          <h3 className="text-2xl font-bold text-gray-900 mb-4">Monitoring</h3>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <DriftWidget />
         </div>
 
         {/* Status Info */}

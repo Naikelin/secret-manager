@@ -2,6 +2,7 @@ package drift
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yourorg/secret-manager/internal/k8s"
 	"github.com/yourorg/secret-manager/internal/models"
+	"github.com/yourorg/secret-manager/internal/notifications"
 	"github.com/yourorg/secret-manager/pkg/logger"
 	"gopkg.in/yaml.v3"
 	"gorm.io/datatypes"
@@ -41,19 +43,21 @@ type K8sClientInterface interface {
 
 // DriftDetector detects drift between Git (source of truth) and Kubernetes (actual state)
 type DriftDetector struct {
-	db         *gorm.DB
-	k8sClient  K8sClientInterface
-	gitClient  GitClientInterface
-	sopsClient SOPSClientInterface
+	db            *gorm.DB
+	k8sClient     K8sClientInterface
+	gitClient     GitClientInterface
+	sopsClient    SOPSClientInterface
+	webhookClient *notifications.WebhookClient
 }
 
 // NewDriftDetector creates a new DriftDetector instance
-func NewDriftDetector(db *gorm.DB, k8sClient K8sClientInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface) *DriftDetector {
+func NewDriftDetector(db *gorm.DB, k8sClient K8sClientInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface, webhookClient *notifications.WebhookClient) *DriftDetector {
 	return &DriftDetector{
-		db:         db,
-		k8sClient:  k8sClient,
-		gitClient:  gitClient,
-		sopsClient: sopsClient,
+		db:            db,
+		k8sClient:     k8sClient,
+		gitClient:     gitClient,
+		sopsClient:    sopsClient,
+		webhookClient: webhookClient,
 	}
 }
 
@@ -158,13 +162,14 @@ func (d *DriftDetector) compareDrift(secret *models.SecretDraft, namespace *mode
 		return nil, fmt.Errorf("failed to decrypt secret from Git: %w", err)
 	}
 
-	// Parse YAML to extract data field
-	var k8sSecretYAML corev1.Secret
-	if err := yaml.Unmarshal(decryptedYAML, &k8sSecretYAML); err != nil {
+	// Parse YAML - use intermediate struct because SOPS-decrypted YAML has base64 strings,
+	// not []byte which corev1.Secret.Data expects
+	k8sSecretYAML, err := parseSecretYAML(decryptedYAML)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse decrypted YAML: %w", err)
 	}
 
-	gitData := k8s.NormalizeSecretData(&k8sSecretYAML)
+	gitData := k8s.NormalizeSecretData(k8sSecretYAML)
 
 	// 2. Get secret from Kubernetes
 	k8sSecret, err := d.k8sClient.GetSecret(namespace.Name, secret.SecretName)
@@ -190,6 +195,22 @@ func (d *DriftDetector) compareDrift(secret *models.SecretDraft, namespace *mode
 			// Save drift event to database
 			if err := d.db.Create(event).Error; err != nil {
 				return nil, fmt.Errorf("failed to save drift event: %w", err)
+			}
+
+			// Send webhook notification
+			if d.webhookClient != nil {
+				notification := notifications.DriftNotification{
+					Namespace:  namespace.Name,
+					SecretName: secret.SecretName,
+					DriftType:  "missing_from_k8s",
+					DetectedAt: event.DetectedAt,
+					Message:    fmt.Sprintf("⚠️ Drift detected: %s/%s - Secret missing from Kubernetes cluster", namespace.Name, secret.SecretName),
+				}
+
+				if err := d.webhookClient.SendDriftNotification(notification); err != nil {
+					logger.Error("Failed to send webhook notification", "error", err)
+					// Don't fail drift detection if webhook fails
+				}
 			}
 
 			return event, nil
@@ -229,11 +250,79 @@ func (d *DriftDetector) compareDrift(secret *models.SecretDraft, namespace *mode
 			return nil, fmt.Errorf("failed to save drift event: %w", err)
 		}
 
+		// Send webhook notification
+		if d.webhookClient != nil {
+			notification := notifications.DriftNotification{
+				Namespace:  namespace.Name,
+				SecretName: secret.SecretName,
+				DriftType:  "data_mismatch",
+				DetectedAt: event.DetectedAt,
+				Message:    fmt.Sprintf("⚠️ Drift detected: %s/%s - Data mismatch between Git and Kubernetes", namespace.Name, secret.SecretName),
+			}
+
+			if err := d.webhookClient.SendDriftNotification(notification); err != nil {
+				logger.Error("Failed to send webhook notification", "error", err)
+				// Don't fail drift detection if webhook fails
+			}
+		}
+
 		return event, nil
 	}
 
 	// No drift detected
 	return nil, nil
+}
+
+// SecretYAML is an intermediate struct for parsing SOPS-decrypted YAML
+// SOPS decrypts to YAML with base64 strings, not []byte that corev1.Secret expects
+type SecretYAML struct {
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Metadata   struct {
+		Name      string            `yaml:"name"`
+		Namespace string            `yaml:"namespace"`
+		Labels    map[string]string `yaml:"labels,omitempty"`
+	} `yaml:"metadata"`
+	Type       corev1.SecretType `yaml:"type,omitempty"`
+	Data       map[string]string `yaml:"data,omitempty"`       // Accept as base64 strings
+	StringData map[string]string `yaml:"stringData,omitempty"` // Accept as plain strings
+}
+
+// parseSecretYAML parses SOPS-decrypted YAML and converts to corev1.Secret
+// Handles base64-encoded strings in the data field by decoding them to []byte
+func parseSecretYAML(decryptedYAML []byte) (*corev1.Secret, error) {
+	// First parse into intermediate struct that accepts strings
+	var intermediate SecretYAML
+	if err := yaml.Unmarshal(decryptedYAML, &intermediate); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+
+	// Convert to corev1.Secret
+	secret := &corev1.Secret{
+		Data: make(map[string][]byte),
+	}
+
+	// Copy metadata
+	secret.Name = intermediate.Metadata.Name
+	secret.Namespace = intermediate.Metadata.Namespace
+	secret.Labels = intermediate.Metadata.Labels
+	secret.Type = intermediate.Type
+
+	// Decode base64 strings in Data field to []byte
+	for key, base64Value := range intermediate.Data {
+		decodedBytes, err := base64.StdEncoding.DecodeString(base64Value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode base64 for key %s: %w", key, err)
+		}
+		secret.Data[key] = decodedBytes
+	}
+
+	// Copy StringData as-is (plain text values)
+	if len(intermediate.StringData) > 0 {
+		secret.StringData = intermediate.StringData
+	}
+
+	return secret, nil
 }
 
 // mustMarshalJSON marshals data to JSON or panics (for internal use)
@@ -289,20 +378,21 @@ func (d *DriftDetector) SyncFromGit(ctx context.Context, driftEventID uuid.UUID)
 	}
 
 	// 5. Parse K8s Secret from YAML
-	var k8sSecret corev1.Secret
-	if err := yaml.Unmarshal(decryptedYAML, &k8sSecret); err != nil {
+	k8sSecret, err := parseSecretYAML(decryptedYAML)
+	if err != nil {
 		return fmt.Errorf("failed to parse secret YAML: %w", err)
 	}
 
 	// 6. Apply to K8s cluster
-	if err := d.k8sClient.ApplySecret(ctx, namespace.Name, &k8sSecret); err != nil {
+	if err := d.k8sClient.ApplySecret(ctx, namespace.Name, k8sSecret); err != nil {
 		return fmt.Errorf("failed to apply secret to Kubernetes: %w", err)
 	}
 
 	// 7. Mark drift event as resolved
 	now := time.Now()
+	resolutionAction := "sync_from_git"
 	driftEvent.ResolvedAt = &now
-	driftEvent.ResolutionAction = "sync_from_git"
+	driftEvent.ResolutionAction = &resolutionAction
 	if err := d.db.Save(&driftEvent).Error; err != nil {
 		return fmt.Errorf("failed to update drift event: %w", err)
 	}
@@ -394,8 +484,9 @@ func (d *DriftDetector) ImportToGit(ctx context.Context, driftEventID uuid.UUID)
 
 	// 7. Mark drift event as resolved
 	now := time.Now()
+	resolutionAction := "import_to_git"
 	driftEvent.ResolvedAt = &now
-	driftEvent.ResolutionAction = "import_to_git"
+	driftEvent.ResolutionAction = &resolutionAction
 	if err := d.db.Save(&driftEvent).Error; err != nil {
 		return fmt.Errorf("failed to update drift event: %w", err)
 	}
@@ -448,9 +539,10 @@ func (d *DriftDetector) MarkResolved(ctx context.Context, driftEventID uuid.UUID
 
 	// 2. Update resolved_at and resolved_by
 	now := time.Now()
+	resolutionAction := "ignore"
 	driftEvent.ResolvedAt = &now
 	driftEvent.ResolvedBy = &userID
-	driftEvent.ResolutionAction = "ignore"
+	driftEvent.ResolutionAction = &resolutionAction
 
 	// 3. Save to DB
 	if err := d.db.Save(&driftEvent).Error; err != nil {
