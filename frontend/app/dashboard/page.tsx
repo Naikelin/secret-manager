@@ -51,19 +51,21 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       {/* Navigation Bar */}
-      <nav className="bg-card border-b">
+      <nav className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center">
-              <h1 className="text-xl font-bold text-foreground">Secret Manager</h1>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Secret Manager
+              </h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-muted-foreground">{user.email}</span>
+              <span className="text-sm text-gray-600">{user.email}</span>
               <button
                 onClick={handleLogout}
-                className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring transition-opacity"
+                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 rounded-md hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200"
               >
                 Logout
               </button>
@@ -75,42 +77,45 @@ export default function DashboardPage() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h2 className="text-3xl font-bold text-foreground">Dashboard</h2>
-          <p className="mt-2 text-muted-foreground">
+          <h2 className="text-4xl font-bold text-gray-900">Dashboard</h2>
+          <p className="mt-2 text-lg text-gray-600">
             Welcome to the GitOps-based Kubernetes Secret Management Platform
           </p>
         </div>
 
         {/* User Info Card */}
-        <div className="bg-card rounded-lg shadow-md p-6 mb-8">
-          <h3 className="text-lg font-semibold text-foreground mb-4">User Information</h3>
-          <div className="space-y-3">
+        <div className="bg-white rounded-xl shadow-md p-6 mb-8 border border-gray-100 hover:shadow-lg transition-shadow duration-200">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <span className="text-2xl">👤</span>
+            User Information
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <span className="text-sm font-medium text-muted-foreground">Name:</span>
-              <p className="text-foreground mt-1">{user.name}</p>
+              <span className="text-sm font-medium text-gray-500">Name</span>
+              <p className="text-gray-900 mt-1 font-medium">{user.name}</p>
             </div>
             <div>
-              <span className="text-sm font-medium text-muted-foreground">Email:</span>
-              <p className="text-foreground mt-1">{user.email}</p>
+              <span className="text-sm font-medium text-gray-500">Email</span>
+              <p className="text-gray-900 mt-1 font-medium">{user.email}</p>
             </div>
             <div>
-              <span className="text-sm font-medium text-muted-foreground">User ID:</span>
-              <p className="text-foreground mt-1 font-mono text-sm">{user.id}</p>
+              <span className="text-sm font-medium text-gray-500">User ID</span>
+              <p className="text-gray-900 mt-1 font-mono text-sm bg-gray-50 px-3 py-1 rounded inline-block">{user.id}</p>
             </div>
             <div>
-              <span className="text-sm font-medium text-muted-foreground">Groups:</span>
+              <span className="text-sm font-medium text-gray-500">Groups</span>
               <div className="mt-2 flex flex-wrap gap-2">
                 {user.groups && user.groups.length > 0 ? (
                   user.groups.map((group) => (
                     <span
                       key={group}
-                      className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary"
+                      className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
                     >
                       {group}
                     </span>
                   ))
                 ) : (
-                  <span className="text-muted-foreground text-sm">No groups assigned</span>
+                  <span className="text-gray-500 text-sm">No groups assigned</span>
                 )}
               </div>
             </div>
@@ -118,54 +123,92 @@ export default function DashboardPage() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-card rounded-lg shadow-md p-6 border-l-4 border-blue-500">
-            <h4 className="text-lg font-semibold text-foreground mb-2">Secrets</h4>
-            <p className="text-sm text-muted-foreground mb-4">
+        <div className="mb-8">
+          <h3 className="text-2xl font-bold text-gray-900 mb-4">Quick Actions</h3>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <a 
+            href="/secrets" 
+            className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-3xl">🔐</span>
+              <h4 className="text-lg font-semibold text-gray-900">Secrets</h4>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
               Manage Kubernetes secrets with GitOps workflow
             </p>
-            <button className="text-sm text-primary hover:underline font-medium">
+            <span className="text-sm text-blue-600 font-medium group-hover:underline">
               View Secrets →
-            </button>
-          </div>
+            </span>
+          </a>
 
-          <div className="bg-card rounded-lg shadow-md p-6 border-l-4 border-yellow-500">
-            <h4 className="text-lg font-semibold text-foreground mb-2">Drift Detection</h4>
-            <p className="text-sm text-muted-foreground mb-4">
+          <a 
+            href="/sync-status" 
+            className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-3xl">🔄</span>
+              <h4 className="text-lg font-semibold text-gray-900">Sync Status</h4>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Monitor FluxCD synchronization status
+            </p>
+            <span className="text-sm text-purple-600 font-medium group-hover:underline">
+              View Sync Status →
+            </span>
+          </a>
+
+          <a 
+            href="/drift" 
+            className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-yellow-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-3xl">⚠️</span>
+              <h4 className="text-lg font-semibold text-gray-900">Drift Detection</h4>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
               Monitor and resolve configuration drift
             </p>
-            <button className="text-sm text-primary hover:underline font-medium">
+            <span className="text-sm text-yellow-700 font-medium group-hover:underline">
               View Drift Events →
-            </button>
-          </div>
+            </span>
+          </a>
 
-          <div className="bg-card rounded-lg shadow-md p-6 border-l-4 border-green-500">
-            <h4 className="text-lg font-semibold text-foreground mb-2">Audit Logs</h4>
-            <p className="text-sm text-muted-foreground mb-4">
+          <a 
+            href="/audit" 
+            className="group bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500 hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-3xl">📋</span>
+              <h4 className="text-lg font-semibold text-gray-900">Audit Logs</h4>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
               Review all secret management activities
             </p>
-            <button className="text-sm text-primary hover:underline font-medium">
+            <span className="text-sm text-green-600 font-medium group-hover:underline">
               View Audit Logs →
-            </button>
-          </div>
+            </span>
+          </a>
         </div>
 
         {/* Status Info */}
-        <div className="mt-8 bg-card rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold text-foreground mb-4">System Status</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="mt-8 bg-white rounded-xl shadow-md p-6 border border-gray-100">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">System Status</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500 shadow-lg shadow-green-500/50"></div>
               <div>
-                <p className="text-sm font-medium text-foreground">Authentication</p>
-                <p className="text-xs text-muted-foreground">Active (Mock Provider)</p>
+                <p className="text-sm font-medium text-gray-900">Authentication</p>
+                <p className="text-xs text-gray-500">Active (Mock Provider)</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
               <div className="w-3 h-3 rounded-full bg-gray-400"></div>
               <div>
-                <p className="text-sm font-medium text-foreground">FluxCD</p>
-                <p className="text-xs text-muted-foreground">Not configured</p>
+                <p className="text-sm font-medium text-gray-900">FluxCD</p>
+                <p className="text-xs text-gray-500">Not configured</p>
               </div>
             </div>
           </div>
