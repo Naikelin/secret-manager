@@ -127,8 +127,15 @@ func TestGetSyncStatus_Success(t *testing.T) {
 		},
 	}
 
+	// Mock Git client
+	mockGit := &MockGitClient{
+		GetCurrentSHAFunc: func() (string, error) {
+			return "abc123", nil
+		},
+	}
+
 	// Create handler
-	handler := NewSyncHandlers(db, mockFlux)
+	handler := NewSyncHandlers(db, mockFlux, mockGit)
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/sync-status", nil)
@@ -157,6 +164,13 @@ func TestGetSyncStatus_Success(t *testing.T) {
 	assert.NotEmpty(t, response.LastSyncTime)
 	assert.Len(t, response.Secrets, 2)
 
+	// Check new Phase 17 fields
+	assert.Equal(t, "abc123", response.GitCommit)  // Git commit from mock
+	assert.Equal(t, "abc123", response.FluxCommit) // Flux commit (alias of LastAppliedCommit)
+	assert.True(t, response.Synced)                // Git and Flux commits match
+	assert.NotEmpty(t, response.LastSync)          // Alias of LastSyncTime
+	assert.Nil(t, response.Error)                  // No errors
+
 	// Check secret sync info
 	for _, secret := range response.Secrets {
 		if secret.Name == "db-creds" {
@@ -177,8 +191,15 @@ func TestGetSyncStatus_NamespaceNotFound(t *testing.T) {
 	// Mock FluxCD client (won't be called)
 	mockFlux := &MockFluxClient{}
 
+	// Mock Git client
+	mockGit := &MockGitClient{
+		GetCurrentSHAFunc: func() (string, error) {
+			return "abc123", nil
+		},
+	}
+
 	// Create handler
-	handler := NewSyncHandlers(db, mockFlux)
+	handler := NewSyncHandlers(db, mockFlux, mockGit)
 
 	// Create request with non-existent namespace
 	randomID := uuid.New()
@@ -203,7 +224,12 @@ func TestGetSyncStatus_NamespaceNotFound(t *testing.T) {
 func TestGetSyncStatus_InvalidNamespaceID(t *testing.T) {
 	db := setupSyncTestDB(t)
 	mockFlux := &MockFluxClient{}
-	handler := NewSyncHandlers(db, mockFlux)
+	mockGit := &MockGitClient{
+		GetCurrentSHAFunc: func() (string, error) {
+			return "abc123", nil
+		},
+	}
+	handler := NewSyncHandlers(db, mockFlux, mockGit)
 
 	// Create request with invalid UUID
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/invalid-uuid/sync-status", nil)
@@ -237,7 +263,7 @@ func TestGetSyncStatus_FluxNotAvailable(t *testing.T) {
 	require.NoError(t, db.Create(&namespace).Error)
 
 	// Create handler with nil FluxCD client
-	handler := NewSyncHandlers(db, nil)
+	handler := NewSyncHandlers(db, nil, nil)
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/sync-status", nil)
@@ -300,8 +326,15 @@ func TestGetSyncStatus_NoPublishedSecrets(t *testing.T) {
 		},
 	}
 
+	// Mock Git client
+	mockGit := &MockGitClient{
+		GetCurrentSHAFunc: func() (string, error) {
+			return "abc123", nil
+		},
+	}
+
 	// Create handler
-	handler := NewSyncHandlers(db, mockFlux)
+	handler := NewSyncHandlers(db, mockFlux, mockGit)
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/sync-status", nil)

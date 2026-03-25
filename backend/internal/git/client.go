@@ -94,6 +94,16 @@ func (c *GitClient) Pull() error {
 		return fmt.Errorf("repository not initialized, call Clone or EnsureRepo first")
 	}
 
+	// Check if remote exists
+	_, err := c.repo.Remote("origin")
+	if err == git.ErrRemoteNotFound {
+		logger.Info("No remote configured, skipping pull (local-only repository)")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check remote: %w", err)
+	}
+
 	logger.Info("Pulling latest changes", "branch", c.branch)
 
 	// Get worktree
@@ -181,9 +191,19 @@ func (c *GitClient) Push() error {
 		return fmt.Errorf("repository not initialized, call Clone or EnsureRepo first")
 	}
 
+	// Check if remote exists
+	_, err := c.repo.Remote("origin")
+	if err == git.ErrRemoteNotFound {
+		logger.Info("No remote configured, skipping push (local-only repository)")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check remote: %w", err)
+	}
+
 	logger.Info("Pushing to remote", "branch", c.branch)
 
-	err := c.repo.Push(&git.PushOptions{
+	err = c.repo.Push(&git.PushOptions{
 		RemoteName: "origin",
 		Auth:       c.auth,
 		Progress:   nil,

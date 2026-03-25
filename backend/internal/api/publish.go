@@ -28,6 +28,7 @@ type GitClientInterface interface {
 	FileExists(path string) (bool, error)
 	GetFilePath(namespace, secretName string) string
 	RepoPath() string
+	GetCurrentSHA() (string, error)
 }
 
 // SOPSClientInterface defines the SOPS operations needed for publishing
@@ -69,6 +70,18 @@ type K8sMetadata struct {
 
 // PublishSecret handles POST /api/v1/namespaces/{namespace}/secrets/{name}/publish
 func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) {
+	// Check if Git and SOPS clients are initialized
+	if h.gitClient == nil {
+		logger.Error("Git client not initialized - check GIT_REPO_PATH configuration")
+		respondError(w, http.StatusServiceUnavailable, "Git repository not configured")
+		return
+	}
+	if h.sopsClient == nil {
+		logger.Error("SOPS client not initialized - check SOPS configuration")
+		respondError(w, http.StatusServiceUnavailable, "SOPS encryption not configured")
+		return
+	}
+
 	ctx := r.Context()
 	namespaceIDStr := chi.URLParam(r, "namespace")
 	secretName := chi.URLParam(r, "name")

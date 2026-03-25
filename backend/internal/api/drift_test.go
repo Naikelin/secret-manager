@@ -24,6 +24,9 @@ import (
 // Mock types for drift testing
 type driftMockGitClient struct {
 	readFileFunc    func(path string) ([]byte, error)
+	writeFileFunc   func(path string, content []byte) error
+	commitFunc      func(message, authorName string, files []string) (string, error)
+	pushFunc        func() error
 	ensureRepoFunc  func() error
 	getFilePathFunc func(namespace, secretName string) string
 }
@@ -33,6 +36,27 @@ func (m *driftMockGitClient) ReadFile(path string) ([]byte, error) {
 		return m.readFileFunc(path)
 	}
 	return nil, fmt.Errorf("file not found")
+}
+
+func (m *driftMockGitClient) WriteFile(path string, content []byte) error {
+	if m.writeFileFunc != nil {
+		return m.writeFileFunc(path, content)
+	}
+	return nil
+}
+
+func (m *driftMockGitClient) Commit(message, authorName string, files []string) (string, error) {
+	if m.commitFunc != nil {
+		return m.commitFunc(message, authorName, files)
+	}
+	return "mock-commit-sha", nil
+}
+
+func (m *driftMockGitClient) Push() error {
+	if m.pushFunc != nil {
+		return m.pushFunc()
+	}
+	return nil
 }
 
 func (m *driftMockGitClient) EnsureRepo() error {
@@ -51,6 +75,7 @@ func (m *driftMockGitClient) GetFilePath(namespace, secretName string) string {
 
 type driftMockSOPSClient struct {
 	decryptYAMLFunc func(encryptedYAML []byte) ([]byte, error)
+	encryptYAMLFunc func(yamlContent []byte) ([]byte, error)
 }
 
 func (m *driftMockSOPSClient) DecryptYAML(encryptedYAML []byte) ([]byte, error) {
@@ -60,8 +85,16 @@ func (m *driftMockSOPSClient) DecryptYAML(encryptedYAML []byte) ([]byte, error) 
 	return encryptedYAML, nil
 }
 
+func (m *driftMockSOPSClient) EncryptYAML(yamlContent []byte) ([]byte, error) {
+	if m.encryptYAMLFunc != nil {
+		return m.encryptYAMLFunc(yamlContent)
+	}
+	return yamlContent, nil
+}
+
 type driftMockK8sClient struct {
-	getSecretFunc func(namespace, name string) (*corev1.Secret, error)
+	getSecretFunc   func(namespace, name string) (*corev1.Secret, error)
+	applySecretFunc func(ctx context.Context, namespace string, secret *corev1.Secret) error
 }
 
 func (m *driftMockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, error) {
@@ -69,6 +102,13 @@ func (m *driftMockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, 
 		return m.getSecretFunc(namespace, name)
 	}
 	return nil, fmt.Errorf("secret not found")
+}
+
+func (m *driftMockK8sClient) ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error {
+	if m.applySecretFunc != nil {
+		return m.applySecretFunc(ctx, namespace, secret)
+	}
+	return nil
 }
 
 // setupDriftTestDB creates an in-memory database for drift testing
@@ -119,7 +159,7 @@ metadata:
   namespace: test-ns
 type: Opaque
 data:
-  key1: value1
+  key1: dmFsdWUx
 `), nil
 		},
 	}

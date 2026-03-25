@@ -27,14 +27,15 @@ func init() {
 
 // MockGitClient is a mock implementation of GitClient for testing
 type MockGitClient struct {
-	EnsureRepoFunc  func() error
-	WriteFileFunc   func(path string, content []byte) error
-	ReadFileFunc    func(path string) ([]byte, error)
-	CommitFunc      func(message, authorName string, files []string) (string, error)
-	PushFunc        func() error
-	FileExistsFunc  func(path string) (bool, error)
-	GetFilePathFunc func(namespace, secretName string) string
-	RepoPathFunc    func() string
+	EnsureRepoFunc    func() error
+	WriteFileFunc     func(path string, content []byte) error
+	ReadFileFunc      func(path string) ([]byte, error)
+	CommitFunc        func(message, authorName string, files []string) (string, error)
+	PushFunc          func() error
+	FileExistsFunc    func(path string) (bool, error)
+	GetFilePathFunc   func(namespace, secretName string) string
+	RepoPathFunc      func() string
+	GetCurrentSHAFunc func() (string, error)
 }
 
 func (m *MockGitClient) EnsureRepo() error {
@@ -91,6 +92,13 @@ func (m *MockGitClient) RepoPath() string {
 		return m.RepoPathFunc()
 	}
 	return "/tmp/test-repo"
+}
+
+func (m *MockGitClient) GetCurrentSHA() (string, error) {
+	if m.GetCurrentSHAFunc != nil {
+		return m.GetCurrentSHAFunc()
+	}
+	return "abc123def456", nil // Default SHA
 }
 
 // MockSOPSClient is a mock implementation of SOPSClient for testing

@@ -48,13 +48,21 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 	gitClient, err := initGitClient(cfg)
 	if err != nil {
 		// Log error but don't fail - publish operations will fail gracefully
-		// logger.Error("Failed to initialize Git client", "error", err)
+		fmt.Printf("[INIT] Git client initialization error: %v\n", err)
+	} else if gitClient != nil {
+		fmt.Printf("[INIT] Git client initialized successfully\n")
+	} else {
+		fmt.Printf("[INIT] Git client is nil (not configured)\n")
 	}
 
 	sopsClient, err := initSOPSClient(cfg)
 	if err != nil {
 		// Log error but don't fail
-		// logger.Error("Failed to initialize SOPS client", "error", err)
+		fmt.Printf("[INIT] SOPS client initialization error: %v\n", err)
+	} else if sopsClient != nil {
+		fmt.Printf("[INIT] SOPS client initialized successfully\n")
+	} else {
+		fmt.Printf("[INIT] SOPS client is nil\n")
 	}
 
 	publishHandlers := NewPublishHandlers(db, gitClient, sopsClient)
@@ -66,7 +74,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 		// logger.Warn("Failed to initialize FluxCD client", "error", err)
 	}
 
-	syncHandlers := NewSyncHandlers(db, fluxClient)
+	syncHandlers := NewSyncHandlers(db, fluxClient, gitClient)
 
 	// Initialize K8s client for K8s secret handlers
 	k8sClient, err := initK8sClient(cfg)
@@ -83,6 +91,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient)
 	}
 	driftHandlers := NewDriftHandlers(db, driftDetector)
+	driftResolutionHandlers := NewDriftResolutionHandlers(db, driftDetector)
+
+	// Initialize namespace handlers
+	namespaceHandlers := NewNamespaceHandlers(db)
+
+	// Initialize audit handlers
+	auditHandlers := NewAuditHandlers(db)
 
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -101,6 +116,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 				nsID := chi.URLParam(r, "namespace")
 				return uuid.Parse(nsID)
 			}
+
+			// Namespaces - list all accessible namespaces
+			r.Get("/namespaces", namespaceHandlers.ListNamespaces)
 
 			// Secrets CRUD with RBAC
 			r.Route("/namespaces/{namespace}/secrets", func(r chi.Router) {
@@ -141,6 +159,36 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 			// Drift detection - require read permission
 			r.With(mw.RequireRead(db, getNamespaceFromParam)).Post("/namespaces/{namespace}/drift-check", driftHandlers.TriggerDriftCheck)
 			r.With(mw.RequireRead(db, getNamespaceFromParam)).Get("/namespaces/{namespace}/drift-events", driftHandlers.ListDriftEvents)
+
+			// Drift resolution - require admin permission on the drift event's namespace
+			// Helper to extract namespace ID from drift event
+			getNamespaceFromDrift := func(r *http.Request) (uuid.UUID, error) {
+				driftIDStr := chi.URLParam(r, "drift_id")
+				driftID, err := uuid.Parse(driftIDStr)
+				if err != nil {
+					return uuid.Nil, fmt.Errorf("invalid drift event ID")
+				}
+
+				var driftEvent struct {
+					NamespaceID uuid.UUID `gorm:"column:namespace_id"`
+				}
+				if err := db.Table("drift_events").Select("namespace_id").Where("id = ?", driftID).First(&driftEvent).Error; err != nil {
+					return uuid.Nil, fmt.Errorf("drift event not found")
+				}
+
+				return driftEvent.NamespaceID, nil
+			}
+
+			r.Route("/drift-events/{drift_id}", func(r chi.Router) {
+				r.With(mw.RequireAdmin(db, getNamespaceFromDrift)).Post("/sync-from-git", driftResolutionHandlers.SyncFromGit)
+				r.With(mw.RequireAdmin(db, getNamespaceFromDrift)).Post("/import-to-git", driftResolutionHandlers.ImportToGit)
+				r.With(mw.RequireAdmin(db, getNamespaceFromDrift)).Post("/mark-resolved", driftResolutionHandlers.MarkResolved)
+			})
+
+			// Audit logs - require authentication (all users can view their own actions)
+			// Admin users can view all audit logs without filters
+			r.Get("/audit-logs", auditHandlers.ListAuditLogs)
+			r.Get("/audit-logs/export", auditHandlers.ExportAuditLogsCSV)
 		})
 	})
 
@@ -161,6 +209,8 @@ func initGitClient(cfg *config.Config) (GitClientInterface, error) {
 		auth, err = git.NewSSHAuth(cfg.GitSSHKeyPath)
 	} else if cfg.GitAuthType == "token" {
 		auth = git.NewTokenAuth(cfg.GitToken, "git")
+	} else if cfg.GitAuthType == "none" {
+		auth = nil // No authentication for local repos
 	} else {
 		return nil, fmt.Errorf("invalid git auth type: %s", cfg.GitAuthType)
 	}

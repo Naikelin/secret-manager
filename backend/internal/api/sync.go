@@ -22,13 +22,15 @@ type FluxClientInterface interface {
 type SyncHandlers struct {
 	db         *gorm.DB
 	fluxClient FluxClientInterface
+	gitClient  GitClientInterface
 }
 
 // NewSyncHandlers creates a new SyncHandlers instance
-func NewSyncHandlers(db *gorm.DB, fluxClient FluxClientInterface) *SyncHandlers {
+func NewSyncHandlers(db *gorm.DB, fluxClient FluxClientInterface, gitClient GitClientInterface) *SyncHandlers {
 	return &SyncHandlers{
 		db:         db,
 		fluxClient: fluxClient,
+		gitClient:  gitClient,
 	}
 }
 
@@ -42,7 +44,15 @@ type SecretSyncInfo struct {
 
 // NamespaceSyncStatus represents the complete sync status for a namespace
 type NamespaceSyncStatus struct {
-	Namespace         string           `json:"namespace"`
+	// New fields for Phase 17 frontend compatibility
+	Namespace  string  `json:"namespace"`
+	GitCommit  string  `json:"git_commit"`
+	FluxCommit string  `json:"flux_commit"`
+	Synced     bool    `json:"synced"`
+	LastSync   string  `json:"last_sync"`
+	Error      *string `json:"error"`
+
+	// Backward compatibility fields (Phase 9)
 	FluxReady         bool             `json:"flux_ready"`
 	LastSyncTime      string           `json:"last_sync_time,omitempty"`
 	LastAppliedCommit string           `json:"last_applied_commit"`
@@ -79,6 +89,25 @@ func (h *SyncHandlers) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 		Secrets:   []SecretSyncInfo{},
 	}
 
+	// Get Git commit SHA if Git client is available
+	var gitCommit string
+	var gitError *string
+	if h.gitClient != nil {
+		sha, err := h.gitClient.GetCurrentSHA()
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to get Git commit: %v", err)
+			gitError = &errMsg
+		} else {
+			gitCommit = sha
+		}
+	} else {
+		// Git not configured
+		errMsg := "Git not configured"
+		gitError = &errMsg
+	}
+	response.GitCommit = gitCommit
+	response.Error = gitError
+
 	// Query FluxCD if client is available
 	if h.fluxClient != nil {
 		kustomizationName := fmt.Sprintf("secrets-%s", namespace.Name)
@@ -86,12 +115,42 @@ func (h *SyncHandlers) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			response.FluxReady = fluxStatus.Ready
 			response.LastAppliedCommit = fluxStatus.LastAppliedCommit
+			response.FluxCommit = fluxStatus.LastAppliedCommit // Alias for frontend
 			response.Message = fluxStatus.Message
 			if !fluxStatus.LastSyncTime.IsZero() {
-				response.LastSyncTime = fluxStatus.LastSyncTime.Format("2006-01-02T15:04:05Z07:00")
+				lastSyncTime := fluxStatus.LastSyncTime.Format("2006-01-02T15:04:05Z07:00")
+				response.LastSyncTime = lastSyncTime
+				response.LastSync = lastSyncTime // Alias for frontend
+			}
+
+			// Determine if Git and Flux are synced
+			if response.GitCommit != "" && response.FluxCommit != "" {
+				// Compare full SHAs or handle short SHAs
+				response.Synced = compareSHAs(response.GitCommit, response.FluxCommit)
+			} else {
+				response.Synced = false
+			}
+		} else {
+			// If error querying FluxCD, set error message
+			if response.Error != nil {
+				// Append FluxCD error to existing Git error
+				errMsg := fmt.Sprintf("%s; FluxCD error: %v", *response.Error, err)
+				response.Error = &errMsg
+			} else {
+				errMsg := fmt.Sprintf("FluxCD error: %v", err)
+				response.Error = &errMsg
 			}
 		}
 		// If error querying FluxCD, leave FluxReady as false but continue
+	} else {
+		// FluxCD client not available
+		if response.Error != nil {
+			errMsg := fmt.Sprintf("%s; FluxCD not configured", *response.Error)
+			response.Error = &errMsg
+		} else {
+			errMsg := "FluxCD not configured"
+			response.Error = &errMsg
+		}
 	}
 
 	// Fetch all published secrets for this namespace
@@ -128,4 +187,17 @@ func (h *SyncHandlers) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// compareSHAs compares two Git commit SHAs, handling short SHA prefixes
+func compareSHAs(sha1, sha2 string) bool {
+	if sha1 == "" || sha2 == "" {
+		return false
+	}
+
+	// If one is a prefix of the other, they match
+	if len(sha1) <= len(sha2) {
+		return sha2[:len(sha1)] == sha1
+	}
+	return sha1[:len(sha2)] == sha2
 }
