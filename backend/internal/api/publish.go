@@ -124,11 +124,8 @@ func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate secret status
-	if secret.Status != "draft" {
-		respondError(w, http.StatusConflict, fmt.Sprintf("Cannot publish secret with status '%s'. Only drafts can be published.", secret.Status))
-		return
-	}
+	// Allow publishing drafts, re-publishing published secrets, and resolving drifted secrets
+	// No status validation needed - all statuses can be published/re-published
 
 	// Convert secret to Kubernetes Secret YAML
 	k8sSecretYAML, err := convertToK8sSecret(&secret, namespace.Name)

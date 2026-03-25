@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yourorg/secret-manager/internal/middleware"
 	"github.com/yourorg/secret-manager/internal/models"
+	"github.com/yourorg/secret-manager/pkg/logger"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -248,10 +249,13 @@ func (h *SecretHandlers) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if secret is in draft status
+	// If secret is not in draft status, automatically revert it to draft
+	// This allows editing published/drifted secrets by creating a new draft version
+	originalStatus := secret.Status
+	statusChanged := false
 	if secret.Status != "draft" {
-		respondError(w, http.StatusConflict, fmt.Sprintf("Cannot update secret with status '%s'. Only drafts can be updated.", secret.Status))
-		return
+		secret.Status = "draft"
+		statusChanged = true
 	}
 
 	// Convert data to JSON
@@ -271,6 +275,32 @@ func (h *SecretHandlers) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create audit log if status was changed from published/drifted to draft
+	if statusChanged {
+		auditDetails := map[string]interface{}{
+			"secret_name":     secret.SecretName,
+			"original_status": originalStatus,
+			"new_status":      "draft",
+			"action":          "edit_revert_to_draft",
+		}
+		detailsJSON, err := json.Marshal(auditDetails)
+		if err == nil {
+			auditLog := models.AuditLog{
+				UserID:       &userCtx.UserID,
+				ActionType:   "update_secret",
+				ResourceType: "secret",
+				ResourceName: secret.SecretName,
+				NamespaceID:  &namespaceID,
+				Timestamp:    time.Now(),
+				Metadata:     detailsJSON,
+			}
+			if err := h.db.Create(&auditLog).Error; err != nil {
+				logger.Error("Failed to create audit log for status change", "error", err)
+				// Don't fail the request if audit log creation fails
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(secret)
@@ -278,6 +308,7 @@ func (h *SecretHandlers) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSecret handles DELETE /api/v1/namespaces/{namespace}/secrets/{name}
 func (h *SecretHandlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	namespaceIDStr := chi.URLParam(r, "namespace")
 	secretName := chi.URLParam(r, "name")
 
@@ -285,6 +316,13 @@ func (h *SecretHandlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 	namespaceID, err := uuid.Parse(namespaceIDStr)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid namespace ID")
+		return
+	}
+
+	// Get user from context for audit logging
+	userCtx, err := middleware.GetUserFromContext(ctx)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "Authentication required")
 		return
 	}
 
@@ -299,10 +337,29 @@ func (h *SecretHandlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if secret is in draft status
-	if secret.Status != "draft" {
-		respondError(w, http.StatusConflict, fmt.Sprintf("Cannot delete secret with status '%s'. Only drafts can be deleted.", secret.Status))
-		return
+	// Allow deletion of secrets in any status
+	// Note: Deleting a published secret will cause drift until unpublished from Git
+
+	// Create audit log before deletion
+	auditDetails := map[string]interface{}{
+		"secret_name": secret.SecretName,
+		"status":      secret.Status,
+	}
+	detailsJSON, err := json.Marshal(auditDetails)
+	if err == nil {
+		auditLog := models.AuditLog{
+			UserID:       &userCtx.UserID,
+			ActionType:   "delete_secret",
+			ResourceType: "secret",
+			ResourceName: secret.SecretName,
+			NamespaceID:  &namespaceID,
+			Timestamp:    time.Now(),
+			Metadata:     detailsJSON,
+		}
+		if err := h.db.Create(&auditLog).Error; err != nil {
+			logger.Error("Failed to create audit log for deletion", "error", err)
+			// Don't fail the request if audit log creation fails
+		}
 	}
 
 	// Delete secret

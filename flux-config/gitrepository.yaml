@@ -1,0 +1,14 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: secrets-repo
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/yourorg/secrets-repo.git  # CHANGE THIS
+  ref:
+    branch: main
+  timeout: 60s
+  # For private repositories, uncomment and configure:
+  # secretRef:
+  #   name: git-credentials

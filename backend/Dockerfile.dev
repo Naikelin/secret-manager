@@ -2,6 +2,12 @@ FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
+# Install dependencies (git for go modules, sops for encryption)
+RUN apk add --no-cache git curl && \
+    curl -LO https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64 && \
+    mv sops-v3.8.1.linux.amd64 /usr/bin/sops && \
+    chmod +x /usr/bin/sops
+
 # Install air for hot reload
 RUN go install github.com/air-verse/air@latest
 

@@ -215,15 +215,20 @@ export default function SecretsPage() {
                         <button
                           onClick={() => router.push(`/secrets/edit/${secret.secret_name}?namespace=${selectedNs}`)}
                           className="text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors duration-150"
+                          title={secret.status !== 'draft' ? 'Editing will create a new draft version' : 'Edit secret'}
                         >
                           Edit
+                          {secret.status !== 'draft' && (
+                            <span className="ml-1 text-xs">✏️</span>
+                          )}
                         </button>
-                        {secret.status === 'draft' && (
+                        {(secret.status === 'draft' || secret.status === 'published' || secret.status === 'drifted') && (
                           <button
                             onClick={() => handlePublish(secret)}
                             className="text-green-600 hover:text-green-800 font-medium hover:underline transition-colors duration-150"
+                            title={secret.status === 'draft' ? 'Publish to Git' : 'Re-publish changes to Git'}
                           >
-                            Publish
+                            {secret.status === 'draft' ? 'Publish' : 'Re-Publish'}
                           </button>
                         )}
                       </div>

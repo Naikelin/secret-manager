@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -42,9 +43,12 @@ type UserContext struct {
 func JWTMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("[JWT Middleware] Called for %s %s", r.Method, r.URL.Path)
+
 			// Extract token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
+				log.Printf("[JWT Middleware] Missing authorization header")
 				respondError(w, http.StatusUnauthorized, "Missing authorization header")
 				return
 			}
@@ -52,11 +56,14 @@ func JWTMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			// Expect "Bearer <token>"
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
+				log.Printf("[JWT Middleware] Invalid authorization header format: %s", authHeader)
 				respondError(w, http.StatusUnauthorized, "Invalid authorization header format")
 				return
 			}
 
 			tokenString := parts[1]
+			log.Printf("[JWT Middleware] Token extracted (length: %d, first 50 chars: %s...)", len(tokenString), tokenString[:min(50, len(tokenString))])
+			log.Printf("[JWT Middleware] JWT Secret length: %d", len(cfg.JWTSecret))
 
 			// Parse and validate JWT
 			token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
@@ -64,15 +71,18 @@ func JWTMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 				}
+				log.Printf("[JWT Middleware] Signing method validated: %v", token.Method)
 				return []byte(cfg.JWTSecret), nil
 			})
 
 			if err != nil {
+				log.Printf("[JWT Middleware] Token parsing error: %v", err)
 				respondError(w, http.StatusUnauthorized, fmt.Sprintf("Invalid token: %v", err))
 				return
 			}
 
 			if !token.Valid {
+				log.Printf("[JWT Middleware] Token is invalid")
 				respondError(w, http.StatusUnauthorized, "Invalid token")
 				return
 			}
@@ -80,9 +90,12 @@ func JWTMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			// Extract claims
 			claims, ok := token.Claims.(*Claims)
 			if !ok {
+				log.Printf("[JWT Middleware] Failed to extract claims")
 				respondError(w, http.StatusUnauthorized, "Invalid token claims")
 				return
 			}
+
+			log.Printf("[JWT Middleware] Successfully validated token for user: %s (ID: %s)", claims.Email, claims.UserID)
 
 			// Attach user to request context
 			userCtx := &UserContext{
@@ -96,6 +109,13 @@ func JWTMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // GetUserFromContext extracts the user from request context
