@@ -1,6 +1,7 @@
 package drift
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -27,6 +28,9 @@ func init() {
 type MockGitClient struct {
 	EnsureRepoFunc  func() error
 	ReadFileFunc    func(path string) ([]byte, error)
+	WriteFileFunc   func(path string, content []byte) error
+	CommitFunc      func(message, authorName string, files []string) (string, error)
+	PushFunc        func() error
 	GetFilePathFunc func(namespace, secretName string) string
 }
 
@@ -44,6 +48,27 @@ func (m *MockGitClient) ReadFile(path string) ([]byte, error) {
 	return nil, fmt.Errorf("file not found")
 }
 
+func (m *MockGitClient) WriteFile(path string, content []byte) error {
+	if m.WriteFileFunc != nil {
+		return m.WriteFileFunc(path, content)
+	}
+	return nil
+}
+
+func (m *MockGitClient) Commit(message, authorName string, files []string) (string, error) {
+	if m.CommitFunc != nil {
+		return m.CommitFunc(message, authorName, files)
+	}
+	return "mock-commit-sha", nil
+}
+
+func (m *MockGitClient) Push() error {
+	if m.PushFunc != nil {
+		return m.PushFunc()
+	}
+	return nil
+}
+
 func (m *MockGitClient) GetFilePath(namespace, secretName string) string {
 	if m.GetFilePathFunc != nil {
 		return m.GetFilePathFunc(namespace, secretName)
@@ -54,6 +79,7 @@ func (m *MockGitClient) GetFilePath(namespace, secretName string) string {
 // MockSOPSClient for testing
 type MockSOPSClient struct {
 	DecryptYAMLFunc func(encryptedYAML []byte) ([]byte, error)
+	EncryptYAMLFunc func(yamlContent []byte) ([]byte, error)
 }
 
 func (m *MockSOPSClient) DecryptYAML(encryptedYAML []byte) ([]byte, error) {
@@ -63,9 +89,17 @@ func (m *MockSOPSClient) DecryptYAML(encryptedYAML []byte) ([]byte, error) {
 	return encryptedYAML, nil
 }
 
+func (m *MockSOPSClient) EncryptYAML(yamlContent []byte) ([]byte, error) {
+	if m.EncryptYAMLFunc != nil {
+		return m.EncryptYAMLFunc(yamlContent)
+	}
+	return yamlContent, nil
+}
+
 // MockK8sClient for testing
 type MockK8sClient struct {
-	GetSecretFunc func(namespace, name string) (*corev1.Secret, error)
+	GetSecretFunc   func(namespace, name string) (*corev1.Secret, error)
+	ApplySecretFunc func(ctx context.Context, namespace string, secret *corev1.Secret) error
 }
 
 func (m *MockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, error) {
@@ -73,6 +107,13 @@ func (m *MockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, error
 		return m.GetSecretFunc(namespace, name)
 	}
 	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
+}
+
+func (m *MockK8sClient) ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error {
+	if m.ApplySecretFunc != nil {
+		return m.ApplySecretFunc(ctx, namespace, secret)
+	}
+	return nil
 }
 
 // setupTestDB creates an in-memory SQLite database for testing
@@ -122,7 +163,34 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			diff TEXT NOT NULL,
 			resolved_at DATETIME,
 			resolved_by TEXT,
-			resolution_action TEXT CHECK(resolution_action IN ('sync_from_git', 'import_to_git', 'ignore')),
+			resolution_action TEXT CHECK(resolution_action IN ('sync_from_git', 'import_to_git', 'ignore', '') OR resolution_action IS NULL),
+			created_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
+	err = db.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT UNIQUE NOT NULL,
+			name TEXT NOT NULL,
+			azure_ad_oid TEXT,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
+	err = db.Exec(`
+		CREATE TABLE audit_logs (
+			id TEXT PRIMARY KEY,
+			user_id TEXT,
+			action_type TEXT NOT NULL,
+			resource_type TEXT NOT NULL,
+			resource_name TEXT NOT NULL,
+			namespace_id TEXT,
+			timestamp DATETIME NOT NULL,
+			metadata TEXT,
 			created_at DATETIME
 		)
 	`).Error
@@ -154,7 +222,7 @@ func TestDetectDriftForSecret_NoChange(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&secret).Error)
 
-	// Mock Git client returning decrypted YAML
+	// Mock Git client returning decrypted YAML (using stringData for plain-text values)
 	gitClient := &MockGitClient{
 		ReadFileFunc: func(path string) ([]byte, error) {
 			yamlContent := `apiVersion: v1
@@ -163,7 +231,7 @@ metadata:
   name: db-creds
   namespace: test-ns
 type: Opaque
-data:
+stringData:
   username: admin
   password: secret123
 `
@@ -225,7 +293,7 @@ func TestDetectDriftForSecret_Modified(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&secret).Error)
 
-	// Mock Git client returning decrypted YAML
+	// Mock Git client returning decrypted YAML (using stringData for plain-text values)
 	gitClient := &MockGitClient{
 		ReadFileFunc: func(path string) ([]byte, error) {
 			yamlContent := `apiVersion: v1
@@ -234,7 +302,7 @@ metadata:
   name: db-creds
   namespace: test-ns
 type: Opaque
-data:
+stringData:
   username: admin
   password: secret123
 `
@@ -304,7 +372,7 @@ func TestDetectDriftForSecret_Deleted(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&secret).Error)
 
-	// Mock Git client returning decrypted YAML
+	// Mock Git client returning decrypted YAML (using stringData for plain-text values)
 	gitClient := &MockGitClient{
 		ReadFileFunc: func(path string) ([]byte, error) {
 			yamlContent := `apiVersion: v1
@@ -313,7 +381,7 @@ metadata:
   name: db-creds
   namespace: test-ns
 type: Opaque
-data:
+stringData:
   username: admin
   password: secret123
 `
@@ -491,7 +559,7 @@ metadata:
   namespace: test-ns
 type: Opaque
 data:
-  key1: value1
+  key1: dmFsdWUx
 `), nil
 		},
 	}
@@ -606,7 +674,7 @@ func TestDetectDriftForSecret_KeyAdded(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&secret).Error)
 
-	// Mock Git client returning YAML with only username
+	// Mock Git client returning YAML with only username (using stringData for plain-text values)
 	gitClient := &MockGitClient{
 		ReadFileFunc: func(path string) ([]byte, error) {
 			return []byte(`apiVersion: v1
@@ -615,7 +683,7 @@ metadata:
   name: db-creds
   namespace: test-ns
 type: Opaque
-data:
+stringData:
   username: admin
 `), nil
 		},

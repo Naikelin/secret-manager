@@ -134,3 +134,40 @@ func (c *K8sClient) DeleteSecret(namespace, name string) error {
 
 	return nil
 }
+
+// ApplySecret creates or updates a secret in Kubernetes
+func (c *K8sClient) ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error {
+	if namespace == "" {
+		return fmt.Errorf("namespace cannot be empty")
+	}
+	if secret == nil {
+		return fmt.Errorf("secret cannot be nil")
+	}
+
+	// Ensure namespace matches
+	secret.Namespace = namespace
+
+	// Try to get existing secret
+	existing, err := c.clientset.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
+
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create new secret
+			_, err = c.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to create secret: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to check existing secret: %w", err)
+	}
+
+	// Update existing (preserve resourceVersion)
+	secret.ResourceVersion = existing.ResourceVersion
+	_, err = c.clientset.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update secret: %w", err)
+	}
+
+	return nil
+}

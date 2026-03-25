@@ -1,6 +1,7 @@
 package drift
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -20,17 +21,22 @@ import (
 type GitClientInterface interface {
 	EnsureRepo() error
 	ReadFile(path string) ([]byte, error)
+	WriteFile(path string, content []byte) error
+	Commit(message, authorName string, files []string) (string, error)
+	Push() error
 	GetFilePath(namespace, secretName string) string
 }
 
 // SOPSClientInterface defines the SOPS operations needed for drift detection
 type SOPSClientInterface interface {
 	DecryptYAML(encryptedYAML []byte) ([]byte, error)
+	EncryptYAML(yamlContent []byte) ([]byte, error)
 }
 
 // K8sClientInterface defines the Kubernetes operations needed for drift detection
 type K8sClientInterface interface {
 	GetSecret(namespace, name string) (*corev1.Secret, error)
+	ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error
 }
 
 // DriftDetector detects drift between Git (source of truth) and Kubernetes (actual state)
@@ -248,4 +254,238 @@ func getMapKeys(m map[string]string) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// SyncFromGit overwrites K8s secret with Git version (Git is source of truth)
+func (d *DriftDetector) SyncFromGit(ctx context.Context, driftEventID uuid.UUID) error {
+	// 1. Load drift event from DB
+	var driftEvent models.DriftEvent
+	if err := d.db.First(&driftEvent, driftEventID).Error; err != nil {
+		return fmt.Errorf("failed to load drift event: %w", err)
+	}
+
+	// Check if already resolved
+	if driftEvent.ResolvedAt != nil {
+		return fmt.Errorf("drift event already resolved at %s", driftEvent.ResolvedAt)
+	}
+
+	// 2. Load namespace
+	var namespace models.Namespace
+	if err := d.db.First(&namespace, driftEvent.NamespaceID).Error; err != nil {
+		return fmt.Errorf("failed to load namespace: %w", err)
+	}
+
+	// 3. Get secret YAML from Git repo
+	filePath := d.gitClient.GetFilePath(namespace.Name, driftEvent.SecretName)
+	encryptedYAML, err := d.gitClient.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read secret from Git: %w", err)
+	}
+
+	// 4. Decrypt with SOPS
+	decryptedYAML, err := d.sopsClient.DecryptYAML(encryptedYAML)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt secret: %w", err)
+	}
+
+	// 5. Parse K8s Secret from YAML
+	var k8sSecret corev1.Secret
+	if err := yaml.Unmarshal(decryptedYAML, &k8sSecret); err != nil {
+		return fmt.Errorf("failed to parse secret YAML: %w", err)
+	}
+
+	// 6. Apply to K8s cluster
+	if err := d.k8sClient.ApplySecret(ctx, namespace.Name, &k8sSecret); err != nil {
+		return fmt.Errorf("failed to apply secret to Kubernetes: %w", err)
+	}
+
+	// 7. Mark drift event as resolved
+	now := time.Now()
+	driftEvent.ResolvedAt = &now
+	driftEvent.ResolutionAction = "sync_from_git"
+	if err := d.db.Save(&driftEvent).Error; err != nil {
+		return fmt.Errorf("failed to update drift event: %w", err)
+	}
+
+	// 8. Update secret status back to published
+	var secret models.SecretDraft
+	if err := d.db.Where("namespace_id = ? AND secret_name = ?", driftEvent.NamespaceID, driftEvent.SecretName).
+		First(&secret).Error; err == nil {
+		if err := d.db.Model(&secret).Update("status", "published").Error; err != nil {
+			logger.Error("Failed to update secret status", "error", err)
+		}
+	}
+
+	// 9. Create audit log entry
+	auditLog := models.AuditLog{
+		ActionType:   "drift_sync_from_git",
+		ResourceType: "secret",
+		ResourceName: driftEvent.SecretName,
+		NamespaceID:  &driftEvent.NamespaceID,
+		Timestamp:    now,
+		Metadata: mustMarshalJSON(map[string]interface{}{
+			"drift_event_id": driftEvent.ID,
+			"namespace":      namespace.Name,
+		}),
+	}
+	if err := d.db.Create(&auditLog).Error; err != nil {
+		logger.Error("Failed to create audit log", "error", err)
+	}
+
+	logger.Info("Synced secret from Git to Kubernetes",
+		"namespace", namespace.Name,
+		"secret", driftEvent.SecretName,
+		"drift_event_id", driftEvent.ID)
+
+	return nil
+}
+
+// ImportToGit imports K8s secret to Git (K8s is source of truth)
+func (d *DriftDetector) ImportToGit(ctx context.Context, driftEventID uuid.UUID) error {
+	// 1. Load drift event from DB
+	var driftEvent models.DriftEvent
+	if err := d.db.First(&driftEvent, driftEventID).Error; err != nil {
+		return fmt.Errorf("failed to load drift event: %w", err)
+	}
+
+	// Check if already resolved
+	if driftEvent.ResolvedAt != nil {
+		return fmt.Errorf("drift event already resolved at %s", driftEvent.ResolvedAt)
+	}
+
+	// 2. Load namespace
+	var namespace models.Namespace
+	if err := d.db.First(&namespace, driftEvent.NamespaceID).Error; err != nil {
+		return fmt.Errorf("failed to load namespace: %w", err)
+	}
+
+	// 3. Get secret from K8s
+	k8sSecret, err := d.k8sClient.GetSecret(namespace.Name, driftEvent.SecretName)
+	if err != nil {
+		return fmt.Errorf("failed to get secret from Kubernetes: %w", err)
+	}
+
+	// 4. Convert to YAML format
+	yamlBytes, err := yaml.Marshal(k8sSecret)
+	if err != nil {
+		return fmt.Errorf("failed to marshal secret to YAML: %w", err)
+	}
+
+	// 5. Encrypt with SOPS
+	encryptedYAML, err := d.sopsClient.EncryptYAML(yamlBytes)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt secret: %w", err)
+	}
+
+	// 6. Commit to Git
+	filePath := d.gitClient.GetFilePath(namespace.Name, driftEvent.SecretName)
+	if err := d.gitClient.WriteFile(filePath, encryptedYAML); err != nil {
+		return fmt.Errorf("failed to write secret to Git: %w", err)
+	}
+
+	commitMsg := fmt.Sprintf("Import secret %s from Kubernetes (drift resolution)", driftEvent.SecretName)
+	if _, err := d.gitClient.Commit(commitMsg, "", []string{filePath}); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	if err := d.gitClient.Push(); err != nil {
+		return fmt.Errorf("failed to push: %w", err)
+	}
+
+	// 7. Mark drift event as resolved
+	now := time.Now()
+	driftEvent.ResolvedAt = &now
+	driftEvent.ResolutionAction = "import_to_git"
+	if err := d.db.Save(&driftEvent).Error; err != nil {
+		return fmt.Errorf("failed to update drift event: %w", err)
+	}
+
+	// 8. Update secret status back to published
+	var secret models.SecretDraft
+	if err := d.db.Where("namespace_id = ? AND secret_name = ?", driftEvent.NamespaceID, driftEvent.SecretName).
+		First(&secret).Error; err == nil {
+		if err := d.db.Model(&secret).Update("status", "published").Error; err != nil {
+			logger.Error("Failed to update secret status", "error", err)
+		}
+	}
+
+	// 9. Create audit log entry
+	auditLog := models.AuditLog{
+		ActionType:   "drift_import_to_git",
+		ResourceType: "secret",
+		ResourceName: driftEvent.SecretName,
+		NamespaceID:  &driftEvent.NamespaceID,
+		Timestamp:    now,
+		Metadata: mustMarshalJSON(map[string]interface{}{
+			"drift_event_id": driftEvent.ID,
+			"namespace":      namespace.Name,
+		}),
+	}
+	if err := d.db.Create(&auditLog).Error; err != nil {
+		logger.Error("Failed to create audit log", "error", err)
+	}
+
+	logger.Info("Imported secret from Kubernetes to Git",
+		"namespace", namespace.Name,
+		"secret", driftEvent.SecretName,
+		"drift_event_id", driftEvent.ID)
+
+	return nil
+}
+
+// MarkResolved marks drift as resolved without taking action (manual resolution)
+func (d *DriftDetector) MarkResolved(ctx context.Context, driftEventID uuid.UUID, userID uuid.UUID) error {
+	// 1. Load drift event
+	var driftEvent models.DriftEvent
+	if err := d.db.First(&driftEvent, driftEventID).Error; err != nil {
+		return fmt.Errorf("failed to load drift event: %w", err)
+	}
+
+	// Check if already resolved
+	if driftEvent.ResolvedAt != nil {
+		return fmt.Errorf("drift event already resolved at %s", driftEvent.ResolvedAt)
+	}
+
+	// 2. Update resolved_at and resolved_by
+	now := time.Now()
+	driftEvent.ResolvedAt = &now
+	driftEvent.ResolvedBy = &userID
+	driftEvent.ResolutionAction = "ignore"
+
+	// 3. Save to DB
+	if err := d.db.Save(&driftEvent).Error; err != nil {
+		return fmt.Errorf("failed to update drift event: %w", err)
+	}
+
+	// 4. Update secret status back to published
+	var secret models.SecretDraft
+	if err := d.db.Where("namespace_id = ? AND secret_name = ?", driftEvent.NamespaceID, driftEvent.SecretName).
+		First(&secret).Error; err == nil {
+		if err := d.db.Model(&secret).Update("status", "published").Error; err != nil {
+			logger.Error("Failed to update secret status", "error", err)
+		}
+	}
+
+	// 5. Create audit log entry
+	auditLog := models.AuditLog{
+		UserID:       &userID,
+		ActionType:   "drift_mark_resolved",
+		ResourceType: "secret",
+		ResourceName: driftEvent.SecretName,
+		NamespaceID:  &driftEvent.NamespaceID,
+		Timestamp:    now,
+		Metadata: mustMarshalJSON(map[string]interface{}{
+			"drift_event_id": driftEvent.ID,
+		}),
+	}
+	if err := d.db.Create(&auditLog).Error; err != nil {
+		logger.Error("Failed to create audit log", "error", err)
+	}
+
+	logger.Info("Marked drift event as resolved",
+		"drift_event_id", driftEvent.ID,
+		"user_id", userID,
+		"secret", driftEvent.SecretName)
+
+	return nil
 }
