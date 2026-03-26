@@ -125,7 +125,86 @@ test('should work with custom user', async ({ page }) => {
 
 ## Docker Testing
 
-If system dependencies are unavailable, run tests in Docker:
+Run tests in complete isolation with Docker (includes database, backend, frontend, and test runner):
+
+```bash
+# Run full E2E test suite in Docker
+./scripts/e2e-docker.sh
+```
+
+This script:
+1. Cleans up any existing containers and volumes
+2. Starts PostgreSQL database
+3. Runs seed data population script
+4. Starts backend API server
+5. Starts frontend Next.js app
+6. Runs Playwright tests
+7. On success: Cleans up containers
+8. On failure: Keeps containers running for debugging
+
+### Seed Data
+
+The E2E environment is pre-populated with test data:
+
+**Users:**
+- `admin@example.com` - Admin User
+- `test@example.com` - Test User  
+- `developer@example.com` - Developer User
+
+**Namespaces:**
+- `development` (dev environment)
+- `staging` (staging environment)
+- `production` (prod environment)
+
+**Secrets:**
+- 9 secrets across all namespaces
+- Mix of `draft` and `published` statuses
+- Examples: `api-credentials`, `database-config`, `oauth-config`, `tls-certificates`, `smtp-config`
+
+**Drift Events:**
+- 5 drift events total
+- 3 unresolved (keys modified, added, removed)
+- 2 resolved (synced from git, ignored)
+- Realistic comparison data with Git vs K8s differences
+
+### Debugging Failed Docker Tests
+
+If tests fail, containers remain running for debugging:
+
+```bash
+# View service logs
+docker-compose -f docker-compose.e2e.yml logs postgres
+docker-compose -f docker-compose.e2e.yml logs seed
+docker-compose -f docker-compose.e2e.yml logs backend
+docker-compose -f docker-compose.e2e.yml logs frontend
+
+# Access running services
+# Backend:  http://localhost:8081
+# Frontend: http://localhost:3001
+
+# Check database data
+docker-compose -f docker-compose.e2e.yml exec postgres psql -U dev -d secretmanager -c "SELECT * FROM users;"
+docker-compose -f docker-compose.e2e.yml exec postgres psql -U dev -d secretmanager -c "SELECT * FROM namespaces;"
+docker-compose -f docker-compose.e2e.yml exec postgres psql -U dev -d secretmanager -c "SELECT * FROM drift_events;"
+
+# Clean up when done
+docker-compose -f docker-compose.e2e.yml down -v
+```
+
+### Adding More Seed Data
+
+Edit `backend/scripts/seed-e2e.go` to add more test data:
+
+1. **Add Users**: Update `createUsers()` function
+2. **Add Namespaces**: Update `createNamespaces()` function
+3. **Add Secrets**: Update `createSecrets()` function
+4. **Add Drift Events**: Update `createDriftEvents()` function
+
+The seed script is idempotent - it cleans all existing data before seeding.
+
+### Manual Docker Testing
+
+If you prefer system dependencies, run tests locally:
 
 ```bash
 # Build test image
