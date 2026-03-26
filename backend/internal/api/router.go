@@ -200,6 +200,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 				r.With(mw.RequirePublish(db, getNamespaceFromDrift)).Post("/import-to-git", driftResolutionHandlers.ImportToGit)
 				// Mark Resolved: only updates DB status (write permission)
 				r.With(mw.RequireWrite(db, getNamespaceFromDrift)).Post("/mark-resolved", driftResolutionHandlers.MarkResolved)
+				// Get Comparison: visual diff data (read permission)
+				r.With(mw.RequireRead(db, getNamespaceFromDrift)).Get("/compare", driftHandlers.GetDriftComparison)
 			})
 
 			// Audit logs - require authentication (all users can view their own actions)

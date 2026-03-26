@@ -259,6 +259,12 @@ export const api = {
     return apiRequest<DriftEventsResponse>(`/api/v1/namespaces/${namespaceId}/drift-events`);
   },
 
+  async getDriftComparison(driftEventId: string): Promise<{ git_data: Record<string, string>; k8s_data: Record<string, string> }> {
+    return apiRequest<{ git_data: Record<string, string>; k8s_data: Record<string, string> }>(
+      `/api/v1/drift-events/${driftEventId}/compare`
+    );
+  },
+
   // Drift Resolution (admin only)
   async syncFromGit(driftEventId: string): Promise<void> {
     return apiRequest<void>(`/api/v1/drift-events/${driftEventId}/sync-from-git`, {

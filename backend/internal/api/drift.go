@@ -62,7 +62,7 @@ type DriftEventDetail struct {
 	Diff             JSONObject `json:"diff"`
 	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
 	ResolvedBy       *uuid.UUID `json:"resolved_by,omitempty"`
-	ResolutionAction string     `json:"resolution_action,omitempty"`
+	ResolutionAction *string    `json:"resolution_action,omitempty"`
 }
 
 // JSONObject is a helper type for JSON fields
@@ -308,4 +308,59 @@ func (h *DriftHandlers) CheckAllNamespaces(w http.ResponseWriter, r *http.Reques
 		"total_namespaces": len(namespaces),
 		"results":          results,
 	})
+}
+
+// DriftComparisonResponse represents side-by-side Git vs K8s comparison
+type DriftComparisonResponse struct {
+	GitData map[string]string `json:"git_data"`
+	K8sData map[string]string `json:"k8s_data"`
+}
+
+// GetDriftComparison handles GET /api/v1/drift-events/{drift_id}/compare
+// Returns side-by-side comparison of Git vs K8s secret data for visual diff
+func (h *DriftHandlers) GetDriftComparison(w http.ResponseWriter, r *http.Request) {
+	driftIDStr := chi.URLParam(r, "drift_id")
+
+	// Parse drift ID
+	driftID, err := uuid.Parse(driftIDStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid drift event ID")
+		return
+	}
+
+	// Load drift event with namespace preloaded
+	var event models.DriftEvent
+	if err := h.db.Preload("Namespace").First(&event, driftID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			respondError(w, http.StatusNotFound, "Drift event not found")
+		} else {
+			logger.Error("Failed to fetch drift event", "error", err)
+			respondError(w, http.StatusInternalServerError, "Failed to fetch drift event")
+		}
+		return
+	}
+
+	// Check if drift detector is available
+	if h.driftDetector == nil {
+		respondError(w, http.StatusServiceUnavailable, "Drift detector not configured")
+		return
+	}
+
+	// Fetch Git and K8s data for comparison
+	gitData, k8sData, err := h.driftDetector.GetComparisonData(event.Namespace.Name, event.SecretName)
+	if err != nil {
+		logger.Error("Failed to fetch comparison data", "error", err)
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch comparison data: %v", err))
+		return
+	}
+
+	// Return comparison response
+	response := DriftComparisonResponse{
+		GitData: gitData,
+		K8sData: k8sData,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }

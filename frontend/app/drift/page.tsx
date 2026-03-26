@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type Namespace, type DriftEvent } from '@/lib/api';
+import { DriftComparison } from '@/components/DriftComparison';
 
 export default function DriftPage() {
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
@@ -10,6 +11,7 @@ export default function DriftPage() {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
+  const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
 
   useEffect(() => {
     loadNamespaces();
@@ -196,76 +198,103 @@ export default function DriftPage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {driftEvents.map((event) => (
-                <div key={event.id} className="p-6 hover:bg-gray-50 transition-colors duration-150">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-3">
-                        <span className="text-3xl">{getDriftIcon(event.drift_type)}</span>
-                        <h3 className="text-xl font-semibold text-gray-900">{event.secret_name}</h3>
-                        <span className={`px-3 py-1 text-xs font-bold rounded-full shadow-sm ${getDriftBadgeColor(event.drift_type)}`}>
-                          {event.drift_type}
-                        </span>
-                        {event.resolved_at && (
-                          <span className="px-3 py-1 text-xs font-bold rounded-full bg-green-100 text-green-800 shadow-sm">
-                            ✓ Resolved
-                          </span>
+              {driftEvents.map((event) => {
+                const isExpanded = expandedEventId === event.id;
+                
+                return (
+                  <div key={event.id} className="transition-colors duration-150">
+                    {/* Event Header - Always Visible */}
+                    <div className="p-6 hover:bg-gray-50">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-3">
+                            <button
+                              onClick={() => setExpandedEventId(isExpanded ? null : event.id)}
+                              className="text-2xl hover:scale-110 transition-transform duration-200"
+                              title={isExpanded ? 'Collapse' : 'Expand to see comparison'}
+                            >
+                              {isExpanded ? '🔽' : '▶️'}
+                            </button>
+                            <span className="text-3xl">{getDriftIcon(event.drift_type)}</span>
+                            <h3 className="text-xl font-semibold text-gray-900">{event.secret_name}</h3>
+                            <span className={`px-3 py-1 text-xs font-bold rounded-full shadow-sm ${getDriftBadgeColor(event.drift_type)}`}>
+                              {event.drift_type}
+                            </span>
+                            {event.resolved_at && (
+                              <span className="px-3 py-1 text-xs font-bold rounded-full bg-green-100 text-green-800 shadow-sm">
+                                ✓ Resolved
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-sm text-gray-600 mb-3">
+                            Detected: <span className="font-medium">{new Date(event.detected_at).toLocaleString()}</span>
+                          </p>
+
+                          {event.details?.message && (
+                            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono mb-3">
+                              {event.details.message}
+                            </div>
+                          )}
+
+                          {event.details?.keys_changed && (
+                            <div className="text-sm text-gray-600 mb-3">
+                              Keys affected: <span className="font-semibold text-gray-900">{event.details.keys_changed.join(', ')}</span>
+                            </div>
+                          )}
+
+                          {event.resolved_at && (
+                            <div className="mt-3 text-sm text-gray-500 bg-green-50 border border-green-200 rounded-lg p-3">
+                              <span className="font-semibold text-green-700">Resolved:</span> {new Date(event.resolved_at).toLocaleString()}
+                              {event.resolution_action && <span className="ml-2">({event.resolution_action})</span>}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Resolution Actions (only for unresolved events) */}
+                        {!event.resolved_at && (
+                          <div className="flex flex-col gap-2 ml-4 min-w-[180px]">
+                            <button
+                              onClick={() => handleResolution(event, 'sync')}
+                              className="px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap transition-all duration-200 shadow-md hover:shadow-lg"
+                              title="Overwrite Kubernetes with Git version"
+                            >
+                              ⬇️ Sync from Git
+                            </button>
+                            <button
+                              onClick={() => handleResolution(event, 'import')}
+                              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap transition-all duration-200 shadow-md hover:shadow-lg"
+                              title="Import Kubernetes changes to Git"
+                            >
+                              ⬆️ Import to Git
+                            </button>
+                            <button
+                              onClick={() => handleResolution(event, 'mark')}
+                              className="px-4 py-2 text-sm font-medium bg-gray-600 text-white rounded-lg hover:bg-gray-700 whitespace-nowrap transition-all duration-200 shadow-md hover:shadow-lg"
+                              title="Mark as resolved without action"
+                            >
+                              ✓ Mark Resolved
+                            </button>
+                          </div>
                         )}
                       </div>
-
-                      <p className="text-sm text-gray-600 mb-3">
-                        Detected: <span className="font-medium">{new Date(event.detected_at).toLocaleString()}</span>
-                      </p>
-
-                      {event.details?.message && (
-                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono mb-3">
-                          {event.details.message}
-                        </div>
-                      )}
-
-                      {event.details?.keys_changed && (
-                        <div className="text-sm text-gray-600 mb-3">
-                          Keys affected: <span className="font-semibold text-gray-900">{event.details.keys_changed.join(', ')}</span>
-                        </div>
-                      )}
-
-                      {event.resolved_at && (
-                        <div className="mt-3 text-sm text-gray-500 bg-green-50 border border-green-200 rounded-lg p-3">
-                          <span className="font-semibold text-green-700">Resolved:</span> {new Date(event.resolved_at).toLocaleString()}
-                          {event.resolution_action && <span className="ml-2">({event.resolution_action})</span>}
-                        </div>
-                      )}
                     </div>
 
-                    {/* Resolution Actions (only for unresolved events) */}
-                    {!event.resolved_at && (
-                      <div className="flex flex-col gap-2 ml-4 min-w-[180px]">
-                        <button
-                          onClick={() => handleResolution(event, 'sync')}
-                          className="px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap transition-all duration-200 shadow-md hover:shadow-lg"
-                          title="Overwrite Kubernetes with Git version"
-                        >
-                          ⬇️ Sync from Git
-                        </button>
-                        <button
-                          onClick={() => handleResolution(event, 'import')}
-                          className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap transition-all duration-200 shadow-md hover:shadow-lg"
-                          title="Import Kubernetes changes to Git"
-                        >
-                          ⬆️ Import to Git
-                        </button>
-                        <button
-                          onClick={() => handleResolution(event, 'mark')}
-                          className="px-4 py-2 text-sm font-medium bg-gray-600 text-white rounded-lg hover:bg-gray-700 whitespace-nowrap transition-all duration-200 shadow-md hover:shadow-lg"
-                          title="Mark as resolved without action"
-                        >
-                          ✓ Mark Resolved
-                        </button>
+                    {/* Visual Diff Comparison - Shown When Expanded */}
+                    {isExpanded && (
+                      <div className="px-6 pb-6 bg-gray-50">
+                        <div className="border-t border-gray-200 pt-6">
+                          <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <span>🔍</span>
+                            Visual Comparison
+                          </h4>
+                          <DriftComparison driftEventId={event.id} />
+                        </div>
                       </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

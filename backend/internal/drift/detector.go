@@ -581,3 +581,48 @@ func (d *DriftDetector) MarkResolved(ctx context.Context, driftEventID uuid.UUID
 
 	return nil
 }
+
+// GetComparisonData fetches and decodes secret data from both Git and K8s for visual comparison
+// Returns two maps: gitData and k8sData with base64-decoded values
+func (d *DriftDetector) GetComparisonData(namespace, secretName string) (map[string]string, map[string]string, error) {
+	gitData := make(map[string]string)
+	k8sData := make(map[string]string)
+
+	// 1. Fetch Git version
+	filePath := d.gitClient.GetFilePath(namespace, secretName)
+	encryptedYAML, err := d.gitClient.ReadFile(filePath)
+	if err != nil {
+		// File missing from Git
+		logger.Warn("Secret file missing from Git", "namespace", namespace, "secret", secretName, "error", err)
+	} else {
+		// Decrypt and parse
+		decryptedYAML, err := d.sopsClient.DecryptYAML(encryptedYAML)
+		if err != nil {
+			logger.Error("Failed to decrypt Git secret", "error", err)
+		} else {
+			k8sSecret, err := parseSecretYAML(decryptedYAML)
+			if err != nil {
+				logger.Error("Failed to parse Git secret YAML", "error", err)
+			} else {
+				// Convert []byte values to strings for display
+				for key, value := range k8sSecret.Data {
+					gitData[key] = string(value)
+				}
+			}
+		}
+	}
+
+	// 2. Fetch K8s version
+	k8sSecret, err := d.k8sClient.GetSecret(namespace, secretName)
+	if err != nil {
+		// Secret missing from K8s
+		logger.Warn("Secret missing from K8s", "namespace", namespace, "secret", secretName, "error", err)
+	} else {
+		// Convert []byte values to strings for display
+		for key, value := range k8sSecret.Data {
+			k8sData[key] = string(value)
+		}
+	}
+
+	return gitData, k8sData, nil
+}
