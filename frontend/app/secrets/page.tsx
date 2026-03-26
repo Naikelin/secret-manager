@@ -308,7 +308,25 @@ function SecretsContent() {
                   const namespace = namespaces.find(ns => ns.id === selectedNs);
                   return (
                     <tr key={secret.id} className="hover:bg-gray-50 transition-colors duration-150">
-                      <td className="px-6 py-4 font-semibold text-gray-900">{secret.secret_name}</td>
+                      <td className="px-6 py-4 font-semibold text-gray-900">
+                        <div className="flex items-center gap-2">
+                          {secret.secret_name}
+                          {secret.status !== 'draft' && (
+                            <a
+                              href={`https://github.com/Naikelin/secret-manager-gitops/blob/main/namespaces/${encodeURIComponent(namespace?.name || '')}/secrets/${encodeURIComponent(secret.secret_name)}.yaml`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-gray-400 hover:text-blue-600 transition-colors"
+                              title="View in GitHub"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                            </a>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-600">{namespace?.name || selectedNs}</td>
                       <td className="px-6 py-4">
                         <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
