@@ -1,0 +1,14 @@
+# Helm ignore patterns
+.git/
+.gitignore
+.DS_Store
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+*.tmproj
+.vscode/
+*.sw?

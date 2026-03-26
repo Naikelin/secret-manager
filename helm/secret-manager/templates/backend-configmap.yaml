@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "secret-manager.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.backend.port | quote }}
+  LOG_LEVEL: {{ .Values.backend.logLevel | quote }}
+  AUTH_PROVIDER: {{ .Values.backend.authProvider | quote }}
+  GIT_REPO_PATH: {{ .Values.backend.git.repoPath | quote }}
+  {{- if .Values.backend.git.repoUrl }}
+  GIT_REPO_URL: {{ .Values.backend.git.repoUrl | quote }}
+  {{- end }}
+  GIT_BRANCH: {{ .Values.backend.git.branch | quote }}
+  GIT_AUTH_TYPE: {{ .Values.backend.git.authType | quote }}
+  GIT_AUTHOR_NAME: {{ .Values.backend.git.authorName | quote }}
+  GIT_AUTHOR_EMAIL: {{ .Values.backend.git.authorEmail | quote }}
+  SOPS_ENABLED: {{ .Values.backend.sops.enabled | quote }}
+  SOPS_ENCRYPT_TYPE: {{ .Values.backend.sops.encryptType | quote }}
+  SOPS_AGE_KEY_PATH: {{ .Values.backend.sops.ageKeyPath | quote }}
+  K8S_KUBECONFIG: ""
+  DRIFT_CHECK_INTERVAL: {{ .Values.backend.drift.checkInterval | quote }}
+  {{- if .Values.backend.drift.webhookUrl }}
+  DRIFT_WEBHOOK_URL: {{ .Values.backend.drift.webhookUrl | quote }}
+  {{- end }}

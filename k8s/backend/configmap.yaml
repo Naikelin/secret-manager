@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: secret-manager
+data:
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  
+  # Authentication provider: mock, azure, or oidc
+  AUTH_PROVIDER: "azure"
+  
+  # Git configuration for drift detection
+  GIT_REPO_PATH: "/data/secrets-repo"
+  GIT_BRANCH: "main"
+  GIT_AUTH_TYPE: "token"
+  GIT_AUTHOR_NAME: "Secret Manager"
+  GIT_AUTHOR_EMAIL: "secret-manager@example.com"
+  
+  # SOPS configuration
+  SOPS_ENABLED: "true"
+  SOPS_ENCRYPT_TYPE: "age"
+  SOPS_AGE_KEY_PATH: "/secrets/sops-age-key"
+  
+  # Kubernetes configuration
+  # Leave empty to use in-cluster config
+  K8S_KUBECONFIG: ""
+  
+  # Drift detection configuration
+  DRIFT_CHECK_INTERVAL: "5m"
+  DRIFT_WEBHOOK_URL: ""

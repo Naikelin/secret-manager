@@ -1,0 +1,106 @@
+# Production values for secret-manager
+# Override default values for production deployment
+
+image:
+  backend:
+    repository: ghcr.io/yourorg/secret-manager-backend
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/yourorg/secret-manager-frontend
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+postgres:
+  enabled: true
+  storageSize: 50Gi
+  storageClass: fast-ssd  # Use your production storage class
+
+backend:
+  logLevel: warn
+  authProvider: azure
+  
+  git:
+    repoUrl: https://github.com/yourorg/secrets-repo.git
+    # token: "" # Set via --set backend.git.token=xxx or sealed-secrets
+  
+  sops:
+    enabled: true
+    # ageKey: "" # Set via --set backend.sops.ageKey=xxx or sealed-secrets
+  
+  drift:
+    checkInterval: 10m
+    webhookUrl: https://slack-webhook.example.com/your-webhook
+  
+  azure:
+    clientId: "your-azure-client-id"
+    # clientSecret: "" # Set via --set backend.azure.clientSecret=xxx
+    tenantId: "your-azure-tenant-id"
+  
+  # jwtSecret: "" # Set via --set backend.jwtSecret=xxx or sealed-secrets
+
+frontend:
+  nextAuthUrl: https://secrets.yourcompany.com
+  apiUrl: http://backend:8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: secrets.yourcompany.com
+  tls:
+    enabled: true
+    secretName: secret-manager-tls
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+resources:
+  backend:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  frontend:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "400m"
+
+autoscaling:
+  backend:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# Example: Use node affinity to run on specific nodes
+# nodeSelector:
+#   workload: production
+
+# Example: Tolerate taints
+# tolerations:
+#   - key: "production"
+#     operator: "Equal"
+#     value: "true"
+#     effect: "NoSchedule"
+
+# Example: Pod anti-affinity for high availability
+# affinity:
+#   podAntiAffinity:
+#     preferredDuringSchedulingIgnoredDuringExecution:
+#       - weight: 100
+#         podAffinityTerm:
+#           labelSelector:
+#             matchExpressions:
+#               - key: app
+#                 operator: In
+#                 values:
+#                   - backend
+#           topologyKey: kubernetes.io/hostname

@@ -1,0 +1,123 @@
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount:
+  backend: 3
+  frontend: 2
+
+image:
+  backend:
+    repository: secret-manager-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: secret-manager-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+postgres:
+  enabled: true
+  storageSize: 10Gi
+  storageClass: standard
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+backend:
+  port: 8080
+  logLevel: info
+  authProvider: azure  # mock, azure, or oidc
+  
+  # Git configuration for drift detection
+  git:
+    repoPath: /data/secrets-repo
+    branch: main
+    authType: token  # token or ssh
+    authorName: Secret Manager
+    authorEmail: secret-manager@example.com
+    # repoUrl: "" # Set in values-prod.yaml or via --set
+    # token: "" # Set in values-prod.yaml or via --set (stored in secret)
+  
+  # SOPS configuration
+  sops:
+    enabled: true
+    encryptType: age
+    ageKeyPath: /secrets/sops-age-key
+    # ageKey: "" # Set in values-prod.yaml or via --set (stored in secret)
+  
+  # Drift detection
+  drift:
+    checkInterval: 5m
+    webhookUrl: ""
+  
+  # Azure AD configuration (if authProvider is azure)
+  azure:
+    clientId: ""
+    clientSecret: ""
+    tenantId: ""
+  
+  # Secrets
+  jwtSecret: changeme-production-jwt-secret
+  databaseUrl: ""  # Auto-generated if postgres.enabled is true
+
+frontend:
+  nextAuthUrl: https://secret-manager.example.com
+  apiUrl: http://backend:8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: secret-manager.example.com
+  tls:
+    enabled: true
+    secretName: secret-manager-tls
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+
+resources:
+  backend:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  frontend:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+autoscaling:
+  backend:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  frontend:
+    enabled: false
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: secret-manager-backend
+
+rbac:
+  create: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
