@@ -22,7 +22,8 @@ import (
 
 // MockGitSync is a mock implementation of GitSyncInterface for testing
 type MockGitSync struct {
-	SyncSecretFunc func(namespaceName, secretName string) error
+	SyncSecretFunc        func(namespaceName, secretName string) error
+	ReadSecretFromGitFunc func(namespaceName, secretName string) (map[string]interface{}, error)
 }
 
 func (m *MockGitSync) SyncSecret(namespaceName, secretName string) error {
@@ -30,6 +31,13 @@ func (m *MockGitSync) SyncSecret(namespaceName, secretName string) error {
 		return m.SyncSecretFunc(namespaceName, secretName)
 	}
 	return nil
+}
+
+func (m *MockGitSync) ReadSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error) {
+	if m.ReadSecretFromGitFunc != nil {
+		return m.ReadSecretFromGitFunc(namespaceName, secretName)
+	}
+	return nil, nil
 }
 
 // setupTestDB creates an in-memory SQLite database for testing
@@ -884,5 +892,232 @@ func TestValidateSecretRequest(t *testing.T) {
 		err := validateSecretRequest("valid-name", nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot be empty")
+	})
+}
+
+func TestGetSecretWithGitVersion(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test user
+	user, userCtx := createTestUser(t, db)
+
+	// Create test namespace
+	namespaceID := uuid.New()
+	namespace := models.Namespace{
+		ID:          namespaceID,
+		Name:        "test-namespace",
+		Cluster:     "test-cluster",
+		Environment: "dev",
+	}
+	require.NoError(t, db.Create(&namespace).Error)
+
+	// Create a published secret (exists in Git)
+	publishedData := map[string]interface{}{"db_password": "secret123"}
+	dataJSON, _ := json.Marshal(publishedData)
+	publishedSecret := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "published-secret",
+		NamespaceID: namespaceID,
+		Data:        datatypes.JSON(dataJSON),
+		Status:      "published",
+		CommitSHA:   "abc123",
+		GitBaseSHA:  "abc123",
+		EditedBy:    &user.ID,
+	}
+	require.NoError(t, db.Create(&publishedSecret).Error)
+
+	// Create a draft secret (doesn't exist in Git)
+	draftData := map[string]interface{}{"api_key": "draft456"}
+	draftJSON, _ := json.Marshal(draftData)
+	draftSecret := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "draft-secret",
+		NamespaceID: namespaceID,
+		Data:        datatypes.JSON(draftJSON),
+		Status:      "draft",
+		EditedBy:    &user.ID,
+	}
+	require.NoError(t, db.Create(&draftSecret).Error)
+
+	// Create a drifted secret (exists in Git but modified locally)
+	driftedData := map[string]interface{}{"token": "modified789"}
+	driftedJSON, _ := json.Marshal(driftedData)
+	driftedSecret := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "drifted-secret",
+		NamespaceID: namespaceID,
+		Data:        datatypes.JSON(driftedJSON),
+		Status:      "drifted",
+		CommitSHA:   "def456",
+		GitBaseSHA:  "def456",
+		EditedBy:    &user.ID,
+	}
+	require.NoError(t, db.Create(&driftedSecret).Error)
+
+	t.Run("without include_git_version parameter", func(t *testing.T) {
+		mockGitSync := &MockGitSync{}
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespaceID.String()+"/secrets/published-secret", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespaceID.String())
+		rctx.URLParams.Add("name", "published-secret")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withUserContext(req, userCtx)
+
+		w := httptest.NewRecorder()
+		handlers.GetSecret(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		// Should NOT include git_data
+		_, hasGitData := response["git_data"]
+		assert.False(t, hasGitData, "git_data should not be present when include_git_version is not set")
+	})
+
+	t.Run("with include_git_version=true for published secret", func(t *testing.T) {
+		gitData := map[string]interface{}{
+			"db_password": "oldpassword",
+			"db_username": "admin",
+		}
+
+		mockGitSync := &MockGitSync{
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+				assert.Equal(t, "test-namespace", namespaceName)
+				assert.Equal(t, "published-secret", secretName)
+				return gitData, nil
+			},
+		}
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespaceID.String()+"/secrets/published-secret?include_git_version=true", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespaceID.String())
+		rctx.URLParams.Add("name", "published-secret")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withUserContext(req, userCtx)
+
+		w := httptest.NewRecorder()
+		handlers.GetSecret(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		// Should include git_data
+		actualGitData, hasGitData := response["git_data"]
+		assert.True(t, hasGitData, "git_data should be present when include_git_version=true for published secret")
+
+		if hasGitData {
+			gitDataMap := actualGitData.(map[string]interface{})
+			assert.Equal(t, "oldpassword", gitDataMap["db_password"])
+			assert.Equal(t, "admin", gitDataMap["db_username"])
+		}
+	})
+
+	t.Run("with include_git_version=true for drifted secret", func(t *testing.T) {
+		gitData := map[string]interface{}{
+			"token": "original-git-token",
+		}
+
+		mockGitSync := &MockGitSync{
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+				assert.Equal(t, "test-namespace", namespaceName)
+				assert.Equal(t, "drifted-secret", secretName)
+				return gitData, nil
+			},
+		}
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespaceID.String()+"/secrets/drifted-secret?include_git_version=true", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespaceID.String())
+		rctx.URLParams.Add("name", "drifted-secret")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withUserContext(req, userCtx)
+
+		w := httptest.NewRecorder()
+		handlers.GetSecret(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		// Should include git_data for drifted secrets
+		actualGitData, hasGitData := response["git_data"]
+		assert.True(t, hasGitData, "git_data should be present when include_git_version=true for drifted secret")
+
+		if hasGitData {
+			gitDataMap := actualGitData.(map[string]interface{})
+			assert.Equal(t, "original-git-token", gitDataMap["token"])
+		}
+	})
+
+	t.Run("with include_git_version=true for draft secret", func(t *testing.T) {
+		mockGitSync := &MockGitSync{
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+				t.Fatal("ReadSecretFromGit should not be called for draft secrets")
+				return nil, nil
+			},
+		}
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespaceID.String()+"/secrets/draft-secret?include_git_version=true", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespaceID.String())
+		rctx.URLParams.Add("name", "draft-secret")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withUserContext(req, userCtx)
+
+		w := httptest.NewRecorder()
+		handlers.GetSecret(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		// Should NOT include git_data for draft secrets
+		_, hasGitData := response["git_data"]
+		assert.False(t, hasGitData, "git_data should not be present for draft secrets even with include_git_version=true")
+	})
+
+	t.Run("handles Git read errors gracefully", func(t *testing.T) {
+		mockGitSync := &MockGitSync{
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+				return nil, fmt.Errorf("Git repository unavailable")
+			},
+		}
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespaceID.String()+"/secrets/published-secret?include_git_version=true", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespaceID.String())
+		rctx.URLParams.Add("name", "published-secret")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		req = withUserContext(req, userCtx)
+
+		w := httptest.NewRecorder()
+		handlers.GetSecret(w, req)
+
+		// Should succeed (200) even if Git read fails
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		// Should NOT include git_data when Git read fails
+		_, hasGitData := response["git_data"]
+		assert.False(t, hasGitData, "git_data should not be present when Git read fails")
 	})
 }

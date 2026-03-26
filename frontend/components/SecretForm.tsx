@@ -16,10 +16,13 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
   const [selectedNamespace, setSelectedNamespace] = useState(namespaceId || secret?.namespace_id || '');
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [keyValues, setKeyValues] = useState<Array<{ key: string; value: string }>>(
-    secret ? Object.entries(secret.data).map(([key, value]) => ({ key, value })) : [{ key: '', value: '' }]
+    secret ? Object.entries(secret.data).map(([key, value]) => ({ key, value: value as string })) : [{ key: '', value: '' }]
   );
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showValues, setShowValues] = useState(false);
+
+  const gitData = secret?.git_data;
 
   useEffect(() => {
     loadNamespaces();
@@ -31,6 +34,23 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
       setSelectedNamespace(namespaceId);
     }
   }, [namespaces, selectedNamespace, namespaceId]);
+
+  // Decode base64 values (Kubernetes Secret format)
+  function decodeValue(base64Value: string): string {
+    try {
+      return atob(base64Value);
+    } catch (e) {
+      return base64Value; // If not base64, return as-is
+    }
+  }
+
+  // Check if a key-value pair differs from Git
+  function isDrifted(key: string, currentValue: string): boolean {
+    if (!gitData) return false;
+    const gitValue = gitData[key];
+    if (!gitValue) return false; // Key doesn't exist in Git
+    return decodeValue(currentValue) !== decodeValue(gitValue);
+  }
 
   async function loadNamespaces() {
     try {
@@ -57,7 +77,8 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
 
   function updateValue(index: number, value: string) {
     const updated = [...keyValues];
-    updated[index].value = value;
+    // Encode the value to base64 when updating
+    updated[index].value = btoa(value);
     setKeyValues(updated);
   }
 
@@ -109,7 +130,30 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
+    <form onSubmit={handleSubmit} className="max-w-6xl mx-auto">
+      {/* Show/Hide Values Toggle (top right) */}
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold">
+          {mode === 'create' ? 'Create Secret' : `Edit Secret: ${secret?.secret_name}`}
+        </h2>
+        <button
+          type="button"
+          onClick={() => setShowValues(!showValues)}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+          {showValues ? '🙈 Hide Values' : '👁️ Show Values'}
+        </button>
+      </div>
+
+      {/* Legend (if Git comparison available) */}
+      {gitData && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-sm">
+          <strong>Legend:</strong> 
+          <span className="ml-2">🟢 Matches Git</span>
+          <span className="ml-4">🟡 Drifted (differs from Git)</span>
+        </div>
+      )}
+
       <div className="mb-6">
         <label htmlFor="secret-name" className="block text-sm font-medium mb-2">Secret Name</label>
         <input
@@ -149,32 +193,81 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
       <div className="mb-6">
         <label className="block text-sm font-medium mb-2">Key-Value Pairs</label>
         {keyValues.map((kv, index) => (
-          <div key={index} className="flex gap-2 mb-2">
-            <input
-              id={`key-${index}`}
-              type="text"
-              value={kv.key}
-              onChange={(e) => updateKey(index, e.target.value)}
-              className="flex-1 px-3 py-2 border rounded"
-              placeholder="key"
-              aria-label="Key"
-            />
-            <input
-              id={`value-${index}`}
-              type="text"
-              value={kv.value}
-              onChange={(e) => updateValue(index, e.target.value)}
-              className="flex-1 px-3 py-2 border rounded"
-              placeholder="value"
-              aria-label="Value"
-            />
+          <div key={index} className="mb-6 p-4 border border-gray-200 rounded-md">
+            {/* Key Name */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Key</label>
+              <input
+                id={`key-${index}`}
+                type="text"
+                value={kv.key}
+                onChange={(e) => updateKey(index, e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                placeholder="key"
+                aria-label="Key"
+              />
+            </div>
+
+            {/* Two-Column Layout: Current vs Git */}
+            {gitData ? (
+              <div className="grid grid-cols-2 gap-4">
+                {/* Current Draft Column */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Current Draft {isDrifted(kv.key, kv.value) ? '🟡' : '🟢'}
+                  </label>
+                  <input
+                    id={`value-${index}`}
+                    type={showValues ? 'text' : 'password'}
+                    value={decodeValue(kv.value)}
+                    onChange={(e) => updateValue(index, e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="value"
+                    aria-label="Value"
+                  />
+                  {isDrifted(kv.key, kv.value) && (
+                    <p className="mt-1 text-xs text-yellow-600">⚠️ Modified (differs from Git)</p>
+                  )}
+                </div>
+
+                {/* Git Version Column (Read-Only) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-1">
+                    Published Git Version
+                  </label>
+                  <input
+                    type={showValues ? 'text' : 'password'}
+                    value={gitData[kv.key] ? decodeValue(gitData[kv.key]) : '(not in Git)'}
+                    readOnly
+                    className="block w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-gray-600 cursor-not-allowed"
+                    aria-label="Git Version"
+                  />
+                </div>
+              </div>
+            ) : (
+              /* Single Column (no Git comparison) */
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Value</label>
+                <input
+                  id={`value-${index}`}
+                  type={showValues ? 'text' : 'password'}
+                  value={decodeValue(kv.value)}
+                  onChange={(e) => updateValue(index, e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  placeholder="value"
+                  aria-label="Value"
+                />
+              </div>
+            )}
+
+            {/* Delete Key Button */}
             {keyValues.length > 1 && (
               <button
                 type="button"
                 onClick={() => removeKeyValue(index)}
-                className="px-3 py-2 text-red-600 hover:bg-red-50 rounded"
+                className="mt-3 text-sm text-red-600 hover:text-red-800"
               >
-                Remove
+                Delete Key
               </button>
             )}
           </div>

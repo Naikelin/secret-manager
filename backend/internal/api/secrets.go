@@ -32,6 +32,7 @@ type SecretHandlers struct {
 // GitSyncInterface defines the interface for Git sync operations
 type GitSyncInterface interface {
 	SyncSecret(namespaceName, secretName string) error
+	ReadSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error)
 }
 
 // NewSecretHandlers creates a new SecretHandlers instance
@@ -216,16 +217,15 @@ func (h *SecretHandlers) ListSecrets(w http.ResponseWriter, r *http.Request) {
 
 // GetSecret handles GET /api/v1/namespaces/{namespace}/secrets/{name}
 // @Summary Get secret by name
-// @Description Retrieve a specific secret by name from a namespace
+// @Description Get a specific secret by name with optional Git version for comparison
 // @Tags secrets
 // @Accept json
 // @Produce json
 // @Param namespace path string true "Namespace ID (UUID)"
 // @Param name path string true "Secret name"
-// @Success 200 {object} models.SecretDraft "Secret details"
-// @Failure 400 {object} map[string]string "Invalid request"
+// @Param include_git_version query bool false "Include Git version for comparison (only for published/drifted secrets)"
+// @Success 200 {object} map[string]interface{} "Secret with optional git_data field"
 // @Failure 404 {object} map[string]string "Secret not found"
-// @Failure 500 {object} map[string]string "Server error"
 // @Security BearerAuth
 // @Router /namespaces/{namespace}/secrets/{name} [get]
 func (h *SecretHandlers) GetSecret(w http.ResponseWriter, r *http.Request) {
@@ -250,9 +250,50 @@ func (h *SecretHandlers) GetSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(secret)
+	// Check if client wants Git version for comparison
+	includeGitVersion := r.URL.Query().Get("include_git_version") == "true"
+
+	var gitData map[string]interface{}
+	if includeGitVersion && (secret.Status == "published" || secret.Status == "drifted") {
+		// Only fetch Git version for secrets that exist in Git
+		// Fetch namespace to get its name
+		var namespace models.Namespace
+		if err := h.db.First(&namespace, namespaceID).Error; err != nil {
+			logger.Warn("Failed to fetch namespace for Git comparison", "error", err)
+		} else {
+			// Read secret from Git
+			gitData, err = h.fetchSecretFromGit(namespace.Name, secretName)
+			if err != nil {
+				logger.Warn("Failed to fetch secret from Git",
+					"namespace", namespace.Name,
+					"secret", secretName,
+					"error", err)
+				// Don't fail the request, just skip Git data
+				gitData = nil
+			}
+		}
+	}
+
+	// Build response
+	response := map[string]interface{}{
+		"id":           secret.ID,
+		"secret_name":  secret.SecretName,
+		"namespace_id": secret.NamespaceID,
+		"data":         secret.Data,
+		"status":       secret.Status,
+		"git_base_sha": secret.GitBaseSHA,
+		"commit_sha":   secret.CommitSHA,
+		"edited_by":    secret.EditedBy,
+		"edited_at":    secret.EditedAt,
+		"created_at":   secret.CreatedAt,
+		"updated_at":   secret.UpdatedAt,
+	}
+
+	if gitData != nil {
+		response["git_data"] = gitData
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }
 
 // UpdateSecret handles PUT /api/v1/namespaces/{namespace}/secrets/{name}
@@ -542,4 +583,13 @@ func respondError(w http.ResponseWriter, code int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"error": message,
 	})
+}
+
+// fetchSecretFromGit reads and decrypts a secret from the Git repository
+func (h *SecretHandlers) fetchSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error) {
+	if h.gitSync == nil {
+		return nil, fmt.Errorf("git sync service not available")
+	}
+
+	return h.gitSync.ReadSecretFromGit(namespaceName, secretName)
 }

@@ -75,8 +75,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 
 	// Initialize Git syncer for secret handlers
 	var gitSyncer GitSyncInterface
-	if gitClient != nil {
-		gitSyncer = initGitSyncer(db, gitClient)
+	if gitClient != nil && sopsClient != nil {
+		gitSyncer = initGitSyncer(db, gitClient, sopsClient)
 	}
 
 	secretHandlers := NewSecretHandlers(db, gitSyncer)
@@ -297,6 +297,6 @@ func initK8sClient(cfg *config.Config) (*k8s.K8sClient, error) {
 }
 
 // initGitSyncer initializes the Git syncer for secret handlers
-func initGitSyncer(db *gorm.DB, gitClient GitClientInterface) *gitsync.Syncer {
-	return gitsync.NewSyncer(db, gitClient)
+func initGitSyncer(db *gorm.DB, gitClient GitClientInterface, sopsClient SOPSClientInterface) *gitsync.Syncer {
+	return gitsync.NewSyncer(db, gitClient, sopsClient)
 }

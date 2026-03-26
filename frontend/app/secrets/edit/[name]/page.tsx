@@ -16,7 +16,8 @@ function EditSecretContent() {
 
   useEffect(() => {
     if (namespaceId && name) {
-      api.getSecret(namespaceId, name)
+      // Fetch secret with Git version for comparison
+      api.getSecret(namespaceId, name, true)
         .then(setSecret)
         .catch(() => alert('Failed to load secret'))
         .finally(() => setLoading(false));

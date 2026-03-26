@@ -126,13 +126,15 @@ export interface Secret {
   id: string;
   secret_name: string;
   namespace_id: string;
-  data: Record<string, string>;
+  data: Record<string, string>; // base64 encoded values
+  git_data?: Record<string, string>; // base64 encoded values from Git (optional)
   status: 'draft' | 'published' | 'drifted';
-  edited_by: string;
-  edited_at: string;
+  git_base_sha?: string;
+  commit_sha?: string;
+  edited_by?: string;
+  edited_at?: string;
   published_by?: string;
   published_at?: string;
-  commit_sha?: string;
   created_at: string;
   updated_at: string;
 }
@@ -221,8 +223,9 @@ export const api = {
     return apiRequest<Secret[]>(`/api/v1/namespaces/${namespaceId}/secrets`);
   },
 
-  async getSecret(namespaceId: string, name: string): Promise<Secret> {
-    return apiRequest<Secret>(`/api/v1/namespaces/${namespaceId}/secrets/${name}`);
+  async getSecret(namespaceId: string, name: string, includeGitVersion = false): Promise<Secret> {
+    const query = includeGitVersion ? '?include_git_version=true' : '';
+    return apiRequest<Secret>(`/api/v1/namespaces/${namespaceId}/secrets/${name}${query}`);
   },
 
   async createSecret(

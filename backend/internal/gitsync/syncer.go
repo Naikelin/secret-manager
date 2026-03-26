@@ -23,17 +23,24 @@ type GitClient interface {
 	ReadFile(path string) ([]byte, error)
 }
 
+// SOPSClient interface for SOPS operations
+type SOPSClient interface {
+	DecryptYAML(encryptedYAML []byte) ([]byte, error)
+}
+
 // Syncer synchronizes secrets from Git repository to database
 type Syncer struct {
-	db        *gorm.DB
-	gitClient GitClient
+	db         *gorm.DB
+	gitClient  GitClient
+	sopsClient SOPSClient
 }
 
 // NewSyncer creates a new Git-to-DB syncer
-func NewSyncer(db *gorm.DB, gitClient GitClient) *Syncer {
+func NewSyncer(db *gorm.DB, gitClient GitClient, sopsClient SOPSClient) *Syncer {
 	return &Syncer{
-		db:        db,
-		gitClient: gitClient,
+		db:         db,
+		gitClient:  gitClient,
+		sopsClient: sopsClient,
 	}
 }
 
@@ -139,9 +146,19 @@ func (s *Syncer) syncSecret(namespace models.Namespace, secretName, filePath, gi
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Decrypt SOPS-encrypted content
+	decryptedContent, err := s.sopsClient.DecryptYAML(data)
+	if err != nil {
+		logger.Warn("[GitSync] Failed to decrypt secret, skipping",
+			"namespace", namespace.Name,
+			"secret", secretName,
+			"error", err)
+		return nil // Skip this secret, don't fail the whole sync
+	}
+
 	// Parse YAML
 	var secretData map[string]interface{}
-	if err := yaml.Unmarshal(data, &secretData); err != nil {
+	if err := yaml.Unmarshal(decryptedContent, &secretData); err != nil {
 		return fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
@@ -273,9 +290,15 @@ func (s *Syncer) SyncSecret(namespaceName, secretName string) error {
 		return fmt.Errorf("secret not found in Git: %w", err)
 	}
 
-	// 5. Parse YAML (reuse logic from syncSecret)
+	// 5. Decrypt SOPS-encrypted content
+	decryptedContent, err := s.sopsClient.DecryptYAML(content)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt secret from Git: %w", err)
+	}
+
+	// 6. Parse YAML (reuse logic from syncSecret)
 	var secretData map[string]interface{}
-	if err := yaml.Unmarshal(content, &secretData); err != nil {
+	if err := yaml.Unmarshal(decryptedContent, &secretData); err != nil {
 		return fmt.Errorf("failed to parse secret YAML: %w", err)
 	}
 
@@ -305,7 +328,7 @@ func (s *Syncer) SyncSecret(namespaceName, secretName string) error {
 		return fmt.Errorf("failed to marshal data to JSON: %w", err)
 	}
 
-	// 6. Update or create DB record with status="published"
+	// 7. Update or create DB record with status="published"
 	now := time.Now()
 	secret := models.SecretDraft{
 		SecretName:  secretName,
@@ -344,4 +367,46 @@ func (s *Syncer) SyncSecret(namespaceName, secretName string) error {
 	}
 
 	return nil
+}
+
+// ReadSecretFromGit reads and decrypts a secret from Git without modifying the database
+func (s *Syncer) ReadSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error) {
+	logger.Info("[GitSync] Reading secret from Git", "namespace", namespaceName, "secret", secretName)
+
+	// 1. Ensure Git repo is up to date
+	if err := s.gitClient.EnsureRepo(); err != nil {
+		return nil, fmt.Errorf("failed to sync Git repository: %w", err)
+	}
+
+	// 2. Read secret file from Git
+	secretPath := fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespaceName, secretName)
+	content, err := s.gitClient.ReadFile(secretPath)
+	if err != nil {
+		return nil, fmt.Errorf("secret not found in Git: %w", err)
+	}
+
+	// 3. Decrypt SOPS-encrypted content
+	decryptedContent, err := s.sopsClient.DecryptYAML(content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt secret from Git: %w", err)
+	}
+
+	// 4. Parse YAML
+	var secretData map[string]interface{}
+	if err := yaml.Unmarshal(decryptedContent, &secretData); err != nil {
+		return nil, fmt.Errorf("failed to parse secret YAML: %w", err)
+	}
+
+	// 5. Extract the actual data field (Kubernetes Secret structure)
+	// The YAML has structure: { apiVersion, kind, metadata, data }
+	// We only want the "data" field
+	if dataField, ok := secretData["data"].(map[string]interface{}); ok {
+		return dataField, nil
+	} else if stringDataField, ok := secretData["stringData"].(map[string]interface{}); ok {
+		// Some secrets use stringData instead of data
+		return stringDataField, nil
+	}
+
+	// If no data/stringData field, return the whole structure
+	return secretData, nil
 }

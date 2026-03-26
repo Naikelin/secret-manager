@@ -94,13 +94,15 @@ func main() {
 	k8sClient, gitClient, sopsClient := initClientsForDrift(cfg)
 
 	// Sync secrets from Git to DB on startup
-	if gitClient != nil {
-		syncer := gitsync.NewSyncer(db, gitClient)
+	if gitClient != nil && sopsClient != nil {
+		syncer := gitsync.NewSyncer(db, gitClient, sopsClient)
 		if err := syncer.SyncAll(); err != nil {
 			logger.Error("Failed to sync secrets from Git to DB", "error", err)
 		} else {
 			logger.Info("Successfully synced secrets from Git to DB")
 		}
+	} else if gitClient != nil {
+		logger.Warn("SOPS client not initialized, skipping Git sync")
 	}
 
 	if k8sClient != nil && gitClient != nil && sopsClient != nil {
