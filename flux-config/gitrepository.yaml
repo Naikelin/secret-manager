@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  url: https://github.com/yourorg/secrets-repo.git  # CHANGE THIS
+  url: https://github.com/Naikelin/secret-manager-gitops.git
   ref:
     branch: main
   timeout: 60s
