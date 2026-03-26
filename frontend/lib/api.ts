@@ -134,11 +134,16 @@ export interface Secret {
 
 export interface DriftEvent {
   id: string;
-  namespace_id: string;
   secret_name: string;
-  drift_type: 'modified' | 'deleted' | 'added';
-  details: any;
   detected_at: string;
+  git_version: Record<string, any>;
+  k8s_version: Record<string, any>;
+  diff: {
+    differences?: string[];
+    message?: string;
+    keys_changed?: string[];
+    [key: string]: any;
+  };
   resolved_at?: string;
   resolved_by?: string;
   resolution_action?: string;

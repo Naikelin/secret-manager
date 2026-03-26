@@ -86,6 +86,22 @@ export default function DriftPage() {
     }
   }
 
+  // Infer drift type from diff data
+  function getDriftType(event: DriftEvent): 'modified' | 'deleted' | 'added' {
+    // Check if keys exist in diff
+    if (event.diff && event.diff.differences) {
+      const diffs = event.diff.differences;
+      if (diffs.some((d: string) => d.includes('added in K8s') || d.includes('not in Git'))) {
+        return 'added';
+      }
+      if (diffs.some((d: string) => d.includes('missing in K8s') || d.includes('not in K8s'))) {
+        return 'deleted';
+      }
+    }
+    // Default to modified (value changes)
+    return 'modified';
+  }
+
   function getDriftBadgeColor(type: string) {
     switch (type) {
       case 'modified': return 'bg-yellow-100 text-yellow-800';
@@ -200,6 +216,8 @@ export default function DriftPage() {
             <div className="divide-y divide-gray-200">
               {driftEvents.map((event) => {
                 const isExpanded = expandedEventId === event.id;
+                const driftType = getDriftType(event);
+                console.log('[DriftPage] Event ID:', event.id, 'isExpanded:', isExpanded, 'expandedEventId:', expandedEventId);
                 
                 return (
                   <div key={event.id} className="transition-colors duration-150">
@@ -209,16 +227,19 @@ export default function DriftPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-3">
                             <button
-                              onClick={() => setExpandedEventId(isExpanded ? null : event.id)}
+                              onClick={() => {
+                                console.log('[DriftPage] Expand button clicked. Current:', expandedEventId, 'New:', isExpanded ? null : event.id);
+                                setExpandedEventId(isExpanded ? null : event.id);
+                              }}
                               className="text-2xl hover:scale-110 transition-transform duration-200"
                               title={isExpanded ? 'Collapse' : 'Expand to see comparison'}
                             >
                               {isExpanded ? '🔽' : '▶️'}
                             </button>
-                            <span className="text-3xl">{getDriftIcon(event.drift_type)}</span>
+                            <span className="text-3xl">{getDriftIcon(driftType)}</span>
                             <h3 className="text-xl font-semibold text-gray-900">{event.secret_name}</h3>
-                            <span className={`px-3 py-1 text-xs font-bold rounded-full shadow-sm ${getDriftBadgeColor(event.drift_type)}`}>
-                              {event.drift_type}
+                            <span className={`px-3 py-1 text-xs font-bold rounded-full shadow-sm ${getDriftBadgeColor(driftType)}`}>
+                              {driftType}
                             </span>
                             {event.resolved_at && (
                               <span className="px-3 py-1 text-xs font-bold rounded-full bg-green-100 text-green-800 shadow-sm">
@@ -231,15 +252,26 @@ export default function DriftPage() {
                             Detected: <span className="font-medium">{new Date(event.detected_at).toLocaleString()}</span>
                           </p>
 
-                          {event.details?.message && (
+                          {event.diff?.message && (
                             <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm font-mono mb-3">
-                              {event.details.message}
+                              {event.diff.message}
                             </div>
                           )}
 
-                          {event.details?.keys_changed && (
+                          {event.diff?.differences && event.diff.differences.length > 0 && (
                             <div className="text-sm text-gray-600 mb-3">
-                              Keys affected: <span className="font-semibold text-gray-900">{event.details.keys_changed.join(', ')}</span>
+                              <div className="font-semibold text-gray-900 mb-1">Differences:</div>
+                              <ul className="list-disc list-inside space-y-1">
+                                {event.diff.differences.map((diff: string, idx: number) => (
+                                  <li key={idx} className="text-gray-700">{diff}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {event.diff?.keys_changed && event.diff.keys_changed.length > 0 && (
+                            <div className="text-sm text-gray-600 mb-3">
+                              Keys affected: <span className="font-semibold text-gray-900">{event.diff.keys_changed.join(', ')}</span>
                             </div>
                           )}
 
@@ -288,6 +320,7 @@ export default function DriftPage() {
                             <span>🔍</span>
                             Visual Comparison
                           </h4>
+                          {console.log('[DriftPage] Rendering DriftComparison for event:', event.id)}
                           <DriftComparison driftEventId={event.id} />
                         </div>
                       </div>
