@@ -15,3 +15,30 @@ export const test = base.extend({
     await use(page);
   },
 });
+
+// Authenticated test fixture with automatic auth setup
+export const authenticatedTest = base.extend({
+  page: async ({ page }, use) => {
+    // Set mock auth token before each test
+    await page.addInitScript(() => {
+      localStorage.setItem('auth_token', 'mock-jwt-token-for-testing');
+      localStorage.setItem('user', JSON.stringify({
+        id: 'test-user-id',
+        email: 'admin@example.com',
+        name: 'Test Admin'
+      }));
+    });
+    await use(page);
+  },
+  session: async ({}, use) => {
+    // Provide session data for tests that need it
+    await use({
+      token: 'mock-jwt-token-for-testing',
+      user: {
+        id: 'test-user-id',
+        email: 'admin@example.com',
+        name: 'Test Admin'
+      }
+    });
+  },
+});

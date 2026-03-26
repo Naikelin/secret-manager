@@ -65,10 +65,16 @@ npm run test:e2e:report
 e2e/
 ├── auth/              # Authentication flow tests
 │   └── login.spec.ts
-├── secrets/           # Secret management tests
+├── secrets/           # Secret lifecycle tests (11 tests)
+│   ├── list.spec.ts
+│   ├── create.spec.ts
+│   ├── edit-publish.spec.ts
+│   └── delete.spec.ts
 ├── drift/             # Drift detection tests
 │   ├── detection.spec.ts
-│   └── comparison.spec.ts
+│   ├── comparison.spec.ts
+│   ├── dashboard-widget.spec.ts
+│   └── resolution.spec.ts
 └── fixtures/          # Test fixtures and helpers
     └── auth.ts
 ```
@@ -77,7 +83,19 @@ e2e/
 
 ### Authentication Fixture
 
-Use the `authenticatedPage` fixture for tests requiring authentication:
+Use the `authenticatedTest` fixture for tests requiring authentication:
+
+```typescript
+import { authenticatedTest } from '../fixtures/auth';
+
+authenticatedTest('should access protected page', async ({ page, session }) => {
+  await page.goto('/dashboard');
+  // Test authenticated features
+  // session.user and session.token are available
+});
+```
+
+Or use the `authenticatedPage` fixture:
 
 ```typescript
 import { test } from '../fixtures/auth';
@@ -187,9 +205,30 @@ Test configuration is in `playwright.config.ts`:
 - ✅ Show user email in navbar
 - ✅ Logout and clear storage
 
+### Secret Lifecycle Tests (`e2e/secrets/`)
+
+- **List Tests** (`list.spec.ts`) - 3 tests
+  - ✅ Display secrets list with correct columns
+  - ✅ Filter secrets by namespace
+  - ✅ Search secrets by name
+
+- **Create Tests** (`create.spec.ts`) - 3 tests
+  - ✅ Create new secret draft successfully
+  - ✅ Validate required fields
+  - ✅ Require at least one key-value pair
+
+- **Edit & Publish Tests** (`edit-publish.spec.ts`) - 3 tests
+  - ✅ Edit existing draft secret
+  - ✅ Publish secret to GitOps
+  - ✅ Prevent publishing drifted secrets
+
+- **Delete Tests** (`delete.spec.ts`) - 2 tests
+  - ✅ Delete draft secret
+  - ✅ Prevent deletion of published secrets
+
 ### Drift Detection Tests (`e2e/drift/`)
 
-Tests for drift detection and comparison features.
+Tests for drift detection, comparison, resolution, and dashboard widget features.
 
 ## Troubleshooting
 
@@ -218,10 +257,10 @@ test('slow operation', async ({ page }) => {
 
 ## Next Steps
 
-1. Add secret management test suite (`e2e/secrets/`)
-2. Add drift resolution workflow tests
-3. Add audit log verification tests
-4. Add sync status monitoring tests
+1. ✅ ~~Add secret management test suite (`e2e/secrets/`)~~
+2. Add audit log verification tests
+3. Add sync status monitoring tests
+4. Add integration tests with backend API
 5. Set up visual regression testing
 6. Configure parallel test execution
 
