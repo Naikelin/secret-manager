@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 interface ComparisonData {
-  git_version: Record<string, string>;
-  k8s_version: Record<string, string>;
+  git_data: Record<string, string>;
+  k8s_data: Record<string, string>;
   keys_added: string[];
   keys_removed: string[];
   keys_modified: string[];
@@ -34,22 +35,24 @@ export function DriftComparison({ driftEventId, secretName, namespace }: Props) 
     setError(null);
     
     try {
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(
-        `http://localhost:8080/api/drift-events/${driftEventId}/compare`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
+      const data = await api.getDriftComparison(driftEventId);
+      
+      // Compute diff metadata from git_data and k8s_data
+      const gitKeys = Object.keys(data.git_data || {});
+      const k8sKeys = Object.keys(data.k8s_data || {});
+      const keys_added = k8sKeys.filter(k => !gitKeys.includes(k));
+      const keys_removed = gitKeys.filter(k => !k8sKeys.includes(k));
+      const keys_modified = gitKeys.filter(k => 
+        k8sKeys.includes(k) && data.git_data[k] !== data.k8s_data[k]
       );
-
-      if (!response.ok) {
-        throw new Error('Failed to load comparison');
-      }
-
-      const data = await response.json();
-      setComparison(data);
+      
+      setComparison({
+        git_data: data.git_data,
+        k8s_data: data.k8s_data,
+        keys_added,
+        keys_removed,
+        keys_modified,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error loading comparison');
     } finally {
@@ -75,8 +78,8 @@ export function DriftComparison({ driftEventId, secretName, namespace }: Props) 
     );
   }
 
-  const gitKeys = Object.keys(comparison?.git_version || {});
-  const k8sKeys = Object.keys(comparison?.k8s_version || {});
+  const gitKeys = Object.keys(comparison?.git_data || {});
+  const k8sKeys = Object.keys(comparison?.k8s_data || {});
   const allKeys = Array.from(new Set([...gitKeys, ...k8sKeys])).sort();
 
   return (
@@ -143,8 +146,8 @@ export function DriftComparison({ driftEventId, secretName, namespace }: Props) 
               </p>
               <div className="space-y-2">
                 {allKeys.map(key => {
-                  const inGit = key in (comparison.git_version || {});
-                  const inK8s = key in (comparison.k8s_version || {});
+                  const inGit = key in (comparison.git_data || {});
+                  const inK8s = key in (comparison.k8s_data || {});
                   
                   if (!inGit) return null; // Skip keys only in K8s for this column
                   
@@ -162,7 +165,7 @@ export function DriftComparison({ driftEventId, secretName, namespace }: Props) 
                     >
                       <div className="font-mono font-semibold text-gray-800">{key}</div>
                       <div className="text-gray-600 text-xs mt-1 break-all">
-                        {maskValue(comparison.git_version[key])}
+                        {maskValue(comparison.git_data[key])}
                       </div>
                     </div>
                   );
@@ -180,8 +183,8 @@ export function DriftComparison({ driftEventId, secretName, namespace }: Props) 
               </p>
               <div className="space-y-2">
                 {allKeys.map(key => {
-                  const inGit = key in (comparison.git_version || {});
-                  const inK8s = key in (comparison.k8s_version || {});
+                  const inGit = key in (comparison.git_data || {});
+                  const inK8s = key in (comparison.k8s_data || {});
                   
                   if (!inK8s) return null; // Skip keys only in Git for this column
                   
@@ -199,7 +202,7 @@ export function DriftComparison({ driftEventId, secretName, namespace }: Props) 
                     >
                       <div className="font-mono font-semibold text-gray-800">{key}</div>
                       <div className="text-gray-600 text-xs mt-1 break-all">
-                        {maskValue(comparison.k8s_version[key])}
+                        {maskValue(comparison.k8s_data[key])}
                       </div>
                     </div>
                   );
