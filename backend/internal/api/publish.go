@@ -124,8 +124,16 @@ func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Allow publishing drafts, re-publishing published secrets, and resolving drifted secrets
-	// No status validation needed - all statuses can be published/re-published
+	// Block publishing if secret has unresolved drift
+	// User must resolve drift first (sync from Git, import to Git, or mark resolved)
+	if secret.Status == "drifted" {
+		respondError(w, http.StatusConflict, "Cannot publish secret with unresolved drift. Please resolve the drift first at /drift")
+		return
+	}
+
+	// Allow publishing drafts and re-publishing published secrets
+	// Status can be: draft, published
+	// Status "drifted" is blocked above
 
 	// Convert secret to Kubernetes Secret YAML
 	k8sSecretYAML, err := convertToK8sSecret(&secret, namespace.Name)

@@ -58,8 +58,16 @@ export default function SecretsPage() {
     try {
       await api.publishSecret(selectedNs, secret.secret_name);
       loadSecrets(selectedNs);
-    } catch (err) {
-      alert('Failed to publish secret');
+    } catch (err: any) {
+      // Check if it's a drift conflict error
+      if (err.response?.status === 409) {
+        alert('❌ Cannot publish: This secret has unresolved drift.\n\n' +
+              'Please resolve the drift first by going to the Drift page.');
+        // Optionally redirect to drift page
+        // router.push(`/drift?secret=${secret.secret_name}&namespace=${selectedNs}`);
+      } else {
+        alert('Failed to publish secret: ' + (err.response?.data?.error || err.message));
+      }
     }
   }
 
@@ -198,10 +206,10 @@ export default function SecretsPage() {
                     <td className="px-6 py-4">
                       <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
                         secret.status === 'published' ? 'bg-green-100 text-green-800' :
-                        secret.status === 'drifted' ? 'bg-yellow-100 text-yellow-800' :
+                        secret.status === 'drifted' ? 'bg-red-100 text-red-800' :
                         'bg-gray-100 text-gray-800'
                       }`}>
-                        {secret.status}
+                        {secret.status === 'drifted' ? '⚠️ drifted' : secret.status}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
@@ -222,7 +230,15 @@ export default function SecretsPage() {
                             <span className="ml-1 text-xs">✏️</span>
                           )}
                         </button>
-                        {(secret.status === 'draft' || secret.status === 'published' || secret.status === 'drifted') && (
+                        {secret.status === 'drifted' ? (
+                          <a
+                            href={`/drift?secret=${secret.secret_name}&namespace=${selectedNs}`}
+                            className="text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors duration-150 flex items-center gap-1"
+                            title="Resolve drift before publishing"
+                          >
+                            ⚠️ Resolve Drift
+                          </a>
+                        ) : (secret.status === 'draft' || secret.status === 'published') && (
                           <button
                             onClick={() => handlePublish(secret)}
                             className="text-green-600 hover:text-green-800 font-medium hover:underline transition-colors duration-150"
