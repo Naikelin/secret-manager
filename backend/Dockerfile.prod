@@ -1,0 +1,83 @@
+# Multi-stage build for production Go backend
+# Stage 1: Build the Go binary
+FROM golang:1.26-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    curl \
+    ca-certificates \
+    tzdata
+
+WORKDIR /build
+
+# Download SOPS for secret encryption
+RUN curl -LO https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64 && \
+    mv sops-v3.8.1.linux.amd64 /usr/local/bin/sops && \
+    chmod +x /usr/local/bin/sops
+
+# Copy go mod files and download dependencies
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Build the binary with optimizations
+# CGO_ENABLED=0 for static binary (no external dependencies)
+# -ldflags="-s -w" strips debug symbols to reduce binary size
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -a \
+    -installsuffix cgo \
+    -ldflags="-s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')" \
+    -o server \
+    ./cmd/server
+
+# Verify the binary works
+RUN ./server --version || true
+
+# Stage 2: Create minimal production image
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    bash \
+    curl \
+    git \
+    openssh-client && \
+    # Create non-root user for security
+    addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser && \
+    # Create necessary directories
+    mkdir -p /app /data/secrets-repo /app/.ssh /app/.age /app/.kube && \
+    chown -R appuser:appuser /app /data
+
+WORKDIR /app
+
+# Copy SOPS binary from builder
+COPY --from=builder /usr/local/bin/sops /usr/local/bin/sops
+
+# Copy the compiled binary from builder
+COPY --from=builder /build/server /app/server
+
+# Copy migrations (if needed at runtime)
+COPY --chown=appuser:appuser migrations /app/migrations
+
+# Set proper permissions
+RUN chmod +x /app/server && \
+    chmod +x /usr/local/bin/sops
+
+# Switch to non-root user
+USER appuser
+
+# Expose application port
+EXPOSE 8080
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Run the binary
+CMD ["/app/server"]

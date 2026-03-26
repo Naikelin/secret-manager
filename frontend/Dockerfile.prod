@@ -1,0 +1,76 @@
+# Multi-stage build for production Next.js frontend
+# Stage 1: Dependencies
+FROM node:18-alpine AS deps
+
+WORKDIR /app
+
+# Install dependencies based on the preferred package manager
+COPY package.json package-lock.json* ./
+
+# Install dependencies with clean slate
+RUN npm ci --only=production --ignore-scripts && \
+    # Copy production node_modules aside
+    cp -R node_modules /prod_node_modules && \
+    # Install all dependencies (including dev) for build
+    npm ci --ignore-scripts
+
+# Stage 2: Builder
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Set build-time environment variables
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+# Build Next.js application
+RUN npm run build
+
+# Stage 3: Runner
+FROM node:18-alpine AS runner
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    ca-certificates && \
+    # Create non-root user for security
+    addgroup -g 1000 nodejs && \
+    adduser -D -u 1000 -G nodejs nextjs && \
+    # Create necessary directories
+    mkdir -p /app/.next && \
+    chown -R nextjs:nodejs /app
+
+# Set environment to production
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+
+# Copy production node_modules from deps stage
+COPY --from=deps --chown=nextjs:nodejs /prod_node_modules ./node_modules
+
+# Copy built application from builder stage
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
+
+# Switch to non-root user
+USER nextjs
+
+# Expose application port
+EXPOSE 3000
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Start Next.js production server
+CMD ["npm", "start"]

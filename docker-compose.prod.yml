@@ -1,0 +1,168 @@
+# Production Docker Compose Configuration
+# DO NOT use this file directly for development
+# See docs/DEPLOYMENT.md for production deployment guide
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: secretmanager-postgres-prod
+    environment:
+      POSTGRES_USER: ${DB_USER:-secretmanager}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Database password required}
+      POSTGRES_DB: ${DB_NAME:-secretmanager}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-secretmanager} -d ${DB_NAME:-secretmanager}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - secretmanager
+    # Production: Don't expose port publicly, use nginx proxy
+    # Uncomment for troubleshooting only
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        GO_VERSION: 1.26-alpine
+    container_name: secretmanager-backend-prod
+    environment:
+      # Database
+      DATABASE_URL: postgres://${DB_USER:-secretmanager}:${DB_PASSWORD:?Database password required}@postgres:5432/${DB_NAME:-secretmanager}?sslmode=disable
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-secretmanager}
+      DB_PASSWORD: ${DB_PASSWORD:?Database password required}
+      DB_NAME: ${DB_NAME:-secretmanager}
+      
+      # Server
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      
+      # Authentication
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-oauth}
+      JWT_SECRET: ${JWT_SECRET:?JWT secret required}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:?OAuth client ID required}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:?OAuth client secret required}
+      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL:-}
+      OAUTH_REDIRECT_URL: ${OAUTH_REDIRECT_URL:-}
+      
+      # Git Integration
+      GIT_REPO_PATH: /data/secrets-repo
+      GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_AUTH_TYPE: ${GIT_AUTH_TYPE:-ssh}
+      GIT_SSH_KEY_PATH: /app/.ssh/id_rsa
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-Secret Manager}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-noreply@secret-manager.local}
+      
+      # SOPS Encryption
+      SOPS_ENABLED: ${SOPS_ENABLED:-true}
+      SOPS_ENCRYPT_TYPE: ${SOPS_ENCRYPT_TYPE:-age}
+      SOPS_AGE_KEY_FILE: /app/.age/keys.txt
+      SOPS_AGE_KEY_PATH: /app/.age/keys.txt
+      
+      # Kubernetes Integration
+      K8S_KUBECONFIG: /app/.kube/config
+      DRIFT_CHECK_INTERVAL: ${DRIFT_CHECK_INTERVAL:-300s}
+      DRIFT_WEBHOOK_URL: ${DRIFT_WEBHOOK_URL:-}
+      
+      # FluxCD Integration
+      FLUX_NAMESPACE: ${FLUX_NAMESPACE:-flux-system}
+      FLUX_HELM_RELEASE: ${FLUX_HELM_RELEASE:-secret-manager}
+    volumes:
+      # Persistent data
+      - secrets_repo:/data/secrets-repo
+      # Secrets (mounted read-only)
+      - ${AGE_KEY_PATH:-./prod-keys/age-keys}:/app/.age:ro
+      - ${SSH_KEY_PATH:-./prod-keys/ssh-keys}:/app/.ssh:ro
+      - ${KUBECONFIG_PATH:-./prod-keys/kubeconfig}:/app/.kube:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - secretmanager
+    # Production: Don't expose port publicly, use nginx proxy
+    # Uncomment for troubleshooting only
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_VERSION: 18-alpine
+        NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8080}
+    container_name: secretmanager-frontend-prod
+    environment:
+      # Next.js Runtime
+      NODE_ENV: production
+      PORT: 3000
+      
+      # API Configuration
+      NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8080}
+      
+      # NextAuth
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?NextAuth URL required}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NextAuth secret required}
+      
+      # OAuth
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:?OAuth client ID required}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:?OAuth client secret required}
+      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL:-}
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - secretmanager
+    # Production: Don't expose port publicly, use nginx proxy
+    # Uncomment for troubleshooting only
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: secretmanager-nginx-prod
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_cache:/var/cache/nginx
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - secretmanager
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  secrets_repo:
+    driver: local
+  nginx_cache:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  secretmanager:
+    driver: bridge
