@@ -370,7 +370,7 @@ func (s *Syncer) SyncSecret(namespaceName, secretName string) error {
 }
 
 // ReadSecretFromGit reads and decrypts a secret from Git without modifying the database
-func (s *Syncer) ReadSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error) {
+func (s *Syncer) ReadSecretFromGit(namespaceName, secretName string) (map[string]string, error) {
 	logger.Info("[GitSync] Reading secret from Git", "namespace", namespaceName, "secret", secretName)
 
 	// 1. Ensure Git repo is up to date
@@ -399,14 +399,31 @@ func (s *Syncer) ReadSecretFromGit(namespaceName, secretName string) (map[string
 
 	// 5. Extract the actual data field (Kubernetes Secret structure)
 	// The YAML has structure: { apiVersion, kind, metadata, data }
-	// We only want the "data" field
+	// We only want the "data" field, and we ensure all values are strings
 	if dataField, ok := secretData["data"].(map[string]interface{}); ok {
-		return dataField, nil
+		// Convert interface{} to string
+		result := make(map[string]string)
+		for k, v := range dataField {
+			if strVal, ok := v.(string); ok {
+				result[k] = strVal
+			} else {
+				// Log warning if value is not a string
+				logger.Warn("[GitSync] Non-string value in secret data field", "key", k, "type", fmt.Sprintf("%T", v))
+			}
+		}
+		return result, nil
 	} else if stringDataField, ok := secretData["stringData"].(map[string]interface{}); ok {
 		// Some secrets use stringData instead of data
-		return stringDataField, nil
+		result := make(map[string]string)
+		for k, v := range stringDataField {
+			if strVal, ok := v.(string); ok {
+				result[k] = strVal
+			} else {
+				logger.Warn("[GitSync] Non-string value in secret stringData field", "key", k, "type", fmt.Sprintf("%T", v))
+			}
+		}
+		return result, nil
 	}
 
-	// If no data/stringData field, return the whole structure
-	return secretData, nil
+	return nil, fmt.Errorf("no data or stringData field found in secret")
 }

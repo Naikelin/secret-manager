@@ -23,7 +23,7 @@ import (
 // MockGitSync is a mock implementation of GitSyncInterface for testing
 type MockGitSync struct {
 	SyncSecretFunc        func(namespaceName, secretName string) error
-	ReadSecretFromGitFunc func(namespaceName, secretName string) (map[string]interface{}, error)
+	ReadSecretFromGitFunc func(namespaceName, secretName string) (map[string]string, error)
 }
 
 func (m *MockGitSync) SyncSecret(namespaceName, secretName string) error {
@@ -33,7 +33,7 @@ func (m *MockGitSync) SyncSecret(namespaceName, secretName string) error {
 	return nil
 }
 
-func (m *MockGitSync) ReadSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error) {
+func (m *MockGitSync) ReadSecretFromGit(namespaceName, secretName string) (map[string]string, error) {
 	if m.ReadSecretFromGitFunc != nil {
 		return m.ReadSecretFromGitFunc(namespaceName, secretName)
 	}
@@ -980,13 +980,13 @@ func TestGetSecretWithGitVersion(t *testing.T) {
 	})
 
 	t.Run("with include_git_version=true for published secret", func(t *testing.T) {
-		gitData := map[string]interface{}{
+		gitData := map[string]string{
 			"db_password": "oldpassword",
 			"db_username": "admin",
 		}
 
 		mockGitSync := &MockGitSync{
-			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]string, error) {
 				assert.Equal(t, "test-namespace", namespaceName)
 				assert.Equal(t, "published-secret", secretName)
 				return gitData, nil
@@ -1022,12 +1022,12 @@ func TestGetSecretWithGitVersion(t *testing.T) {
 	})
 
 	t.Run("with include_git_version=true for drifted secret", func(t *testing.T) {
-		gitData := map[string]interface{}{
+		gitData := map[string]string{
 			"token": "original-git-token",
 		}
 
 		mockGitSync := &MockGitSync{
-			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]string, error) {
 				assert.Equal(t, "test-namespace", namespaceName)
 				assert.Equal(t, "drifted-secret", secretName)
 				return gitData, nil
@@ -1063,7 +1063,7 @@ func TestGetSecretWithGitVersion(t *testing.T) {
 
 	t.Run("with include_git_version=true for draft secret", func(t *testing.T) {
 		mockGitSync := &MockGitSync{
-			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]string, error) {
 				t.Fatal("ReadSecretFromGit should not be called for draft secrets")
 				return nil, nil
 			},
@@ -1093,7 +1093,7 @@ func TestGetSecretWithGitVersion(t *testing.T) {
 
 	t.Run("handles Git read errors gracefully", func(t *testing.T) {
 		mockGitSync := &MockGitSync{
-			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]interface{}, error) {
+			ReadSecretFromGitFunc: func(namespaceName, secretName string) (map[string]string, error) {
 				return nil, fmt.Errorf("Git repository unavailable")
 			},
 		}

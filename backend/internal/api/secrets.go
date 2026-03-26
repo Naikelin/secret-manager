@@ -32,7 +32,7 @@ type SecretHandlers struct {
 // GitSyncInterface defines the interface for Git sync operations
 type GitSyncInterface interface {
 	SyncSecret(namespaceName, secretName string) error
-	ReadSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error)
+	ReadSecretFromGit(namespaceName, secretName string) (map[string]string, error)
 }
 
 // NewSecretHandlers creates a new SecretHandlers instance
@@ -253,7 +253,7 @@ func (h *SecretHandlers) GetSecret(w http.ResponseWriter, r *http.Request) {
 	// Check if client wants Git version for comparison
 	includeGitVersion := r.URL.Query().Get("include_git_version") == "true"
 
-	var gitData map[string]interface{}
+	var gitData map[string]string
 	if includeGitVersion && (secret.Status == "published" || secret.Status == "drifted") {
 		// Only fetch Git version for secrets that exist in Git
 		// Fetch namespace to get its name
@@ -586,7 +586,7 @@ func respondError(w http.ResponseWriter, code int, message string) {
 }
 
 // fetchSecretFromGit reads and decrypts a secret from the Git repository
-func (h *SecretHandlers) fetchSecretFromGit(namespaceName, secretName string) (map[string]interface{}, error) {
+func (h *SecretHandlers) fetchSecretFromGit(namespaceName, secretName string) (map[string]string, error) {
 	if h.gitSync == nil {
 		return nil, fmt.Errorf("git sync service not available")
 	}
