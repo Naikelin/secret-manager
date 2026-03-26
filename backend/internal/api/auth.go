@@ -47,6 +47,16 @@ func NewAuthHandlers(db *gorm.DB, cfg *config.Config) *AuthHandlers {
 }
 
 // HandleLogin redirects to OAuth2 provider
+// @Summary Initiate OAuth2 login
+// @Description Starts OAuth2 authentication flow by generating redirect URL to OAuth2 provider
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param body body object{email=string} true "User email"
+// @Success 200 {object} map[string]string "Returns redirect URL"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 500 {object} map[string]string "Server error"
+// @Router /auth/login [post]
 func (h *AuthHandlers) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Parse request body to extract email
 	var req struct {
@@ -103,6 +113,17 @@ func (h *AuthHandlers) HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleCallback processes OAuth2 callback
+// @Summary OAuth2 callback handler
+// @Description Processes OAuth2 callback, validates state, exchanges code for token, and generates JWT
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param code query string true "Authorization code from OAuth2 provider"
+// @Param state query string true "State parameter for CSRF protection"
+// @Success 200 {object} map[string]interface{} "Returns JWT token and user info"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 500 {object} map[string]string "Authentication failed"
+// @Router /auth/callback [get]
 func (h *AuthHandlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Validate state parameter
 	state := r.URL.Query().Get("state")
@@ -177,6 +198,12 @@ func (h *AuthHandlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleLogout clears the session
+// @Summary Logout user
+// @Description Logout endpoint for client-side JWT invalidation
+// @Tags authentication
+// @Produce json
+// @Success 200 {object} map[string]string "Logout successful"
+// @Router /auth/logout [post]
 func (h *AuthHandlers) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	// In JWT-based auth, logout is client-side (delete token)
 	// Server-side logout would require token blacklisting (future enhancement)
@@ -188,6 +215,15 @@ func (h *AuthHandlers) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
 // HandleMockCallback processes the mock auth callback (DEVELOPMENT ONLY)
 // Bypasses external OAuth2 server by directly looking up user and issuing JWT
+// @Summary Mock authentication callback (DEV ONLY)
+// @Description Development-only endpoint that bypasses OAuth2 and directly issues JWT for testing
+// @Tags authentication
+// @Produce json
+// @Param email query string true "User email"
+// @Success 302 {string} string "Redirects to frontend with token"
+// @Failure 400 {object} map[string]string "Missing email"
+// @Failure 401 {object} map[string]string "User not found"
+// @Router /auth/mock-callback [get]
 func (h *AuthHandlers) HandleMockCallback(w http.ResponseWriter, r *http.Request) {
 	// Extract email from query parameter
 	email := r.URL.Query().Get("email")

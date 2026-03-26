@@ -46,6 +46,18 @@ func NewK8sSecretHandlers(db *gorm.DB, k8sClient *k8s.K8sClient) *K8sSecretHandl
 
 // ListK8sSecrets lists all secrets in a K8s namespace
 // GET /api/v1/namespaces/{namespace}/k8s-secrets
+// @Summary List Kubernetes secrets
+// @Description List all secrets currently deployed in the Kubernetes namespace (metadata only, no values)
+// @Tags kubernetes
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Success 200 {object} K8sSecretsListResponse "List of Kubernetes secrets"
+// @Failure 404 {object} map[string]string "Namespace not found"
+// @Failure 503 {object} map[string]string "Kubernetes cluster not available"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/k8s-secrets [get]
 func (h *K8sSecretHandlers) ListK8sSecrets(w http.ResponseWriter, r *http.Request) {
 	// Check if K8s client is available
 	if h.k8sClient == nil {
@@ -101,6 +113,19 @@ func (h *K8sSecretHandlers) ListK8sSecrets(w http.ResponseWriter, r *http.Reques
 
 // GetK8sSecret retrieves a single K8s secret details (metadata only, no data values)
 // GET /api/v1/namespaces/{namespace}/k8s-secrets/{name}
+// @Summary Get Kubernetes secret details
+// @Description Get metadata for a specific Kubernetes secret (keys only, no values)
+// @Tags kubernetes
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param name path string true "Secret name"
+// @Success 200 {object} K8sSecretInfo "Kubernetes secret metadata"
+// @Failure 404 {object} map[string]string "Namespace or secret not found"
+// @Failure 503 {object} map[string]string "Kubernetes cluster not available"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/k8s-secrets/{name} [get]
 func (h *K8sSecretHandlers) GetK8sSecret(w http.ResponseWriter, r *http.Request) {
 	// Check if K8s client is available
 	if h.k8sClient == nil {

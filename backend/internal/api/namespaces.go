@@ -19,6 +19,16 @@ func NewNamespaceHandlers(db *gorm.DB) *NamespaceHandlers {
 }
 
 // ListNamespaces returns all namespaces the authenticated user has access to
+// @Summary List accessible namespaces
+// @Description Get all namespaces the authenticated user has access to via their groups
+// @Tags namespaces
+// @Accept json
+// @Produce json
+// @Success 200 {array} models.Namespace "List of namespaces"
+// @Failure 401 {object} map[string]string "Authentication required"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces [get]
 func (h *NamespaceHandlers) ListNamespaces(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[NamespaceHandler] ListNamespaces called")
 

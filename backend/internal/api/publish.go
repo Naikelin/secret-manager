@@ -69,6 +69,22 @@ type K8sMetadata struct {
 }
 
 // PublishSecret handles POST /api/v1/namespaces/{namespace}/secrets/{name}/publish
+// @Summary Publish secret to Git
+// @Description Encrypts secret with SOPS and commits to Git repository for GitOps sync to Kubernetes
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param name path string true "Secret name"
+// @Success 200 {object} models.SecretDraft "Published secret with commit SHA"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 401 {object} map[string]string "Authentication required"
+// @Failure 404 {object} map[string]string "Namespace or secret not found"
+// @Failure 409 {object} map[string]string "Secret has unresolved drift"
+// @Failure 503 {object} map[string]string "Git or SOPS not configured"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets/{name}/publish [post]
 func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) {
 	// Check if Git and SOPS clients are initialized
 	if h.gitClient == nil {
@@ -218,6 +234,21 @@ func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) 
 }
 
 // UnpublishSecret handles POST /api/v1/namespaces/{namespace}/secrets/{name}/unpublish
+// @Summary Unpublish secret from Git
+// @Description Removes secret from Git repository and reverts status to draft
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param name path string true "Secret name"
+// @Success 200 {object} models.SecretDraft "Unpublished secret"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 401 {object} map[string]string "Authentication required"
+// @Failure 404 {object} map[string]string "Namespace or secret not found"
+// @Failure 409 {object} map[string]string "Secret is not published"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets/{name}/unpublish [post]
 func (h *PublishHandlers) UnpublishSecret(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	namespaceIDStr := chi.URLParam(r, "namespace")

@@ -69,6 +69,18 @@ type DriftEventDetail struct {
 type JSONObject map[string]interface{}
 
 // TriggerDriftCheck handles POST /api/v1/namespaces/{namespace}/drift-check
+// @Summary Trigger drift detection
+// @Description Manually trigger drift detection for all published secrets in a namespace
+// @Tags drift
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Success 200 {object} DriftCheckResponse "Drift check results"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 404 {object} map[string]string "Namespace not found"
+// @Failure 500 {object} map[string]string "Drift detection failed"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/drift-check [post]
 func (h *DriftHandlers) TriggerDriftCheck(w http.ResponseWriter, r *http.Request) {
 	namespaceIDStr := chi.URLParam(r, "namespace")
 
@@ -142,6 +154,22 @@ func (h *DriftHandlers) TriggerDriftCheck(w http.ResponseWriter, r *http.Request
 }
 
 // ListDriftEvents handles GET /api/v1/namespaces/{namespace}/drift-events
+// @Summary List drift events
+// @Description Get all drift events for a namespace with filtering and pagination
+// @Tags drift
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param status query string false "Filter by status (resolved, active)"
+// @Param secret_name query string false "Filter by secret name"
+// @Param limit query int false "Results per page (max 100)" default(50)
+// @Param offset query int false "Pagination offset" default(0)
+// @Success 200 {object} DriftEventsResponse "List of drift events"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 404 {object} map[string]string "Namespace not found"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/drift-events [get]
 func (h *DriftHandlers) ListDriftEvents(w http.ResponseWriter, r *http.Request) {
 	namespaceIDStr := chi.URLParam(r, "namespace")
 
@@ -270,6 +298,15 @@ func extractDiffSummary(diffData map[string]interface{}) string {
 
 // CheckAllNamespaces handles POST /api/v1/drift/check-all
 // Admin-only endpoint to manually trigger drift check across all namespaces
+// @Summary Check drift for all namespaces
+// @Description Admin endpoint to trigger drift detection across all namespaces
+// @Tags drift
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "Drift check results for all namespaces"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /drift/check-all [post]
 func (h *DriftHandlers) CheckAllNamespaces(w http.ResponseWriter, r *http.Request) {
 	var namespaces []models.Namespace
 	if err := h.db.Find(&namespaces).Error; err != nil {
@@ -318,6 +355,19 @@ type DriftComparisonResponse struct {
 
 // GetDriftComparison handles GET /api/v1/drift-events/{drift_id}/compare
 // Returns side-by-side comparison of Git vs K8s secret data for visual diff
+// @Summary Get drift comparison
+// @Description Get side-by-side comparison of Git and Kubernetes versions for a drift event
+// @Tags drift
+// @Accept json
+// @Produce json
+// @Param drift_id path string true "Drift Event ID (UUID)"
+// @Success 200 {object} DriftComparisonResponse "Side-by-side comparison"
+// @Failure 400 {object} map[string]string "Invalid drift event ID"
+// @Failure 404 {object} map[string]string "Drift event not found"
+// @Failure 503 {object} map[string]string "Drift detector not configured"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /drift-events/{drift_id}/compare [get]
 func (h *DriftHandlers) GetDriftComparison(w http.ResponseWriter, r *http.Request) {
 	driftIDStr := chi.URLParam(r, "drift_id")
 

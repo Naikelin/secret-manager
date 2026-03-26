@@ -40,6 +40,25 @@ type AuditLogResponse struct {
 //   - end_date: Filter logs before this date (RFC3339 format)
 //   - page: Page number (default: 1)
 //   - limit: Results per page (default: 50, max: 500)
+//
+// @Summary List audit logs
+// @Description Get audit logs with filtering and pagination
+// @Tags audit
+// @Accept json
+// @Produce json
+// @Param user_id query string false "Filter by user ID (UUID)"
+// @Param action query string false "Filter by action type"
+// @Param resource_type query string false "Filter by resource type"
+// @Param resource_name query string false "Filter by resource name"
+// @Param namespace_id query string false "Filter by namespace ID (UUID)"
+// @Param start_date query string false "Filter logs after date (RFC3339)"
+// @Param end_date query string false "Filter logs before date (RFC3339)"
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Results per page (max 500)" default(50)
+// @Success 200 {object} AuditLogResponse "Audit logs"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /audit-logs [get]
 func (h *AuditHandlers) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	query := h.db.Model(&models.AuditLog{})
 
@@ -126,6 +145,22 @@ func (h *AuditHandlers) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExportAuditLogsCSV exports audit logs as CSV with the same filtering options
+// @Summary Export audit logs to CSV
+// @Description Export audit logs as CSV file with same filtering options as list endpoint (max 10,000 rows)
+// @Tags audit
+// @Accept json
+// @Produce text/csv
+// @Param user_id query string false "Filter by user ID (UUID)"
+// @Param action query string false "Filter by action type"
+// @Param resource_type query string false "Filter by resource type"
+// @Param resource_name query string false "Filter by resource name"
+// @Param namespace_id query string false "Filter by namespace ID (UUID)"
+// @Param start_date query string false "Filter logs after date (RFC3339)"
+// @Param end_date query string false "Filter logs before date (RFC3339)"
+// @Success 200 {file} string "CSV file download"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /audit-logs/export [get]
 func (h *AuditHandlers) ExportAuditLogsCSV(w http.ResponseWriter, r *http.Request) {
 	query := h.db.Model(&models.AuditLog{})
 

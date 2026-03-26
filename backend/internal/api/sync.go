@@ -62,6 +62,18 @@ type NamespaceSyncStatus struct {
 
 // GetSyncStatus handles GET /api/v1/namespaces/{namespace}/sync-status
 // Returns FluxCD sync status for a namespace
+// @Summary Get FluxCD sync status
+// @Description Get GitOps synchronization status between Git and Kubernetes via FluxCD
+// @Tags sync
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Success 200 {object} NamespaceSyncStatus "Sync status details"
+// @Failure 400 {object} map[string]string "Invalid namespace ID"
+// @Failure 404 {object} map[string]string "Namespace not found"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/sync-status [get]
 func (h *SyncHandlers) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 	// Parse namespace ID from URL
 	namespaceIDStr := chi.URLParam(r, "namespace")

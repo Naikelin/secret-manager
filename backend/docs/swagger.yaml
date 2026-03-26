@@ -1,0 +1,1494 @@
+basePath: /api/v1
+definitions:
+  github_com_yourorg_secret-manager_internal_models.AuditLog:
+    properties:
+      action_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      metadata:
+        items:
+          type: integer
+        type: array
+      namespace:
+        $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+      namespace_id:
+        type: string
+      resource_name:
+        type: string
+      resource_type:
+        type: string
+      timestamp:
+        type: string
+      user:
+        allOf:
+        - $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.User'
+        description: Relationships
+      user_id:
+        type: string
+    type: object
+  github_com_yourorg_secret-manager_internal_models.DriftEvent:
+    properties:
+      created_at:
+        type: string
+      detected_at:
+        type: string
+      diff:
+        items:
+          type: integer
+        type: array
+      git_version:
+        items:
+          type: integer
+        type: array
+      id:
+        type: string
+      k8s_version:
+        items:
+          type: integer
+        type: array
+      namespace:
+        allOf:
+        - $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+        description: Relationships
+      namespace_id:
+        type: string
+      resolution_action:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by:
+        type: string
+      resolver:
+        $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.User'
+      secret_name:
+        type: string
+    type: object
+  github_com_yourorg_secret-manager_internal_models.Group:
+    properties:
+      azure_ad_gid:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      permissions:
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.GroupPermission'
+        type: array
+      users:
+        description: Relationships
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.User'
+        type: array
+    type: object
+  github_com_yourorg_secret-manager_internal_models.GroupPermission:
+    properties:
+      created_at:
+        type: string
+      group:
+        allOf:
+        - $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Group'
+        description: Relationships
+      group_id:
+        type: string
+      id:
+        type: string
+      namespace:
+        $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+      namespace_id:
+        type: string
+      role:
+        type: string
+    type: object
+  github_com_yourorg_secret-manager_internal_models.Namespace:
+    properties:
+      cluster:
+        type: string
+      created_at:
+        type: string
+      drift_events:
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.DriftEvent'
+        type: array
+      environment:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      permissions:
+        description: Relationships
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.GroupPermission'
+        type: array
+      secret_drafts:
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+        type: array
+    type: object
+  github_com_yourorg_secret-manager_internal_models.SecretDraft:
+    properties:
+      commit_sha:
+        type: string
+      created_at:
+        type: string
+      data:
+        items:
+          type: integer
+        type: array
+      edited_at:
+        type: string
+      edited_by:
+        type: string
+      editor:
+        $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.User'
+      git_base_sha:
+        type: string
+      id:
+        type: string
+      namespace:
+        allOf:
+        - $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+        description: Relationships
+      namespace_id:
+        type: string
+      published_at:
+        type: string
+      published_by:
+        type: string
+      publisher:
+        $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.User'
+      secret_name:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_yourorg_secret-manager_internal_models.User:
+    properties:
+      azure_ad_oid:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      groups:
+        description: Relationships
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Group'
+        type: array
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  internal_api.AuditLogResponse:
+    properties:
+      limit:
+        type: integer
+      logs:
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.AuditLog'
+        type: array
+      page:
+        type: integer
+      total:
+        type: integer
+    type: object
+  internal_api.CreateSecretRequest:
+    properties:
+      data:
+        additionalProperties: true
+        type: object
+      name:
+        type: string
+    type: object
+  internal_api.DriftCheckResponse:
+    properties:
+      checked:
+        type: integer
+      drifted:
+        type: integer
+      events:
+        items:
+          $ref: '#/definitions/internal_api.DriftEventSummary'
+        type: array
+      namespace:
+        type: string
+    type: object
+  internal_api.DriftComparisonResponse:
+    properties:
+      git_data:
+        additionalProperties:
+          type: string
+        type: object
+      k8s_data:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  internal_api.DriftEventDetail:
+    properties:
+      detected_at:
+        type: string
+      diff:
+        $ref: '#/definitions/internal_api.JSONObject'
+      git_version:
+        $ref: '#/definitions/internal_api.JSONObject'
+      id:
+        type: string
+      k8s_version:
+        $ref: '#/definitions/internal_api.JSONObject'
+      resolution_action:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by:
+        type: string
+      secret_name:
+        type: string
+    type: object
+  internal_api.DriftEventSummary:
+    properties:
+      detected_at:
+        type: string
+      diff_summary:
+        type: string
+      id:
+        type: string
+      secret_name:
+        type: string
+    type: object
+  internal_api.DriftEventsResponse:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/internal_api.DriftEventDetail'
+        type: array
+      namespace:
+        type: string
+      total:
+        type: integer
+    type: object
+  internal_api.JSONObject:
+    additionalProperties: true
+    type: object
+  internal_api.K8sSecretInfo:
+    properties:
+      annotations:
+        additionalProperties:
+          type: string
+        type: object
+      created_at:
+        type: string
+      data_keys:
+        items:
+          type: string
+        type: array
+      labels:
+        additionalProperties:
+          type: string
+        type: object
+      managed_by_gitops:
+        type: boolean
+      name:
+        type: string
+      namespace:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_api.K8sSecretsListResponse:
+    properties:
+      namespace:
+        type: string
+      secrets:
+        items:
+          $ref: '#/definitions/internal_api.K8sSecretInfo'
+        type: array
+    type: object
+  internal_api.NamespaceSyncStatus:
+    properties:
+      error:
+        type: string
+      flux_commit:
+        type: string
+      flux_ready:
+        description: Backward compatibility fields (Phase 9)
+        type: boolean
+      git_commit:
+        type: string
+      last_applied_commit:
+        type: string
+      last_sync:
+        type: string
+      last_sync_time:
+        type: string
+      message:
+        type: string
+      namespace:
+        description: New fields for Phase 17 frontend compatibility
+        type: string
+      secrets:
+        items:
+          $ref: '#/definitions/internal_api.SecretSyncInfo'
+        type: array
+      synced:
+        type: boolean
+    type: object
+  internal_api.SecretSyncInfo:
+    properties:
+      commit_sha:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      synced_to_k8s:
+        type: boolean
+    type: object
+  internal_api.UpdateSecretRequest:
+    properties:
+      data:
+        additionalProperties: true
+        type: object
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+    url: https://github.com/yourorg/secret-manager/issues
+  description: Production-ready secret management with drift detection and GitOps
+    integration
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://github.com/yourorg/secret-manager
+  title: Secret Manager API
+  version: "1.0"
+paths:
+  /audit-logs:
+    get:
+      consumes:
+      - application/json
+      description: Get audit logs with filtering and pagination
+      parameters:
+      - description: Filter by user ID (UUID)
+        in: query
+        name: user_id
+        type: string
+      - description: Filter by action type
+        in: query
+        name: action
+        type: string
+      - description: Filter by resource type
+        in: query
+        name: resource_type
+        type: string
+      - description: Filter by resource name
+        in: query
+        name: resource_name
+        type: string
+      - description: Filter by namespace ID (UUID)
+        in: query
+        name: namespace_id
+        type: string
+      - description: Filter logs after date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: Filter logs before date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 50
+        description: Results per page (max 500)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Audit logs
+          schema:
+            $ref: '#/definitions/internal_api.AuditLogResponse'
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List audit logs
+      tags:
+      - audit
+  /audit-logs/export:
+    get:
+      consumes:
+      - application/json
+      description: Export audit logs as CSV file with same filtering options as list
+        endpoint (max 10,000 rows)
+      parameters:
+      - description: Filter by user ID (UUID)
+        in: query
+        name: user_id
+        type: string
+      - description: Filter by action type
+        in: query
+        name: action
+        type: string
+      - description: Filter by resource type
+        in: query
+        name: resource_type
+        type: string
+      - description: Filter by resource name
+        in: query
+        name: resource_name
+        type: string
+      - description: Filter by namespace ID (UUID)
+        in: query
+        name: namespace_id
+        type: string
+      - description: Filter logs after date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: Filter logs before date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV file download
+          schema:
+            type: file
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Export audit logs to CSV
+      tags:
+      - audit
+  /auth/callback:
+    get:
+      consumes:
+      - application/json
+      description: Processes OAuth2 callback, validates state, exchanges code for
+        token, and generates JWT
+      parameters:
+      - description: Authorization code from OAuth2 provider
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: State parameter for CSRF protection
+        in: query
+        name: state
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns JWT token and user info
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Authentication failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: OAuth2 callback handler
+      tags:
+      - authentication
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Starts OAuth2 authentication flow by generating redirect URL to
+        OAuth2 provider
+      parameters:
+      - description: User email
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            email:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns redirect URL
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Initiate OAuth2 login
+      tags:
+      - authentication
+  /auth/logout:
+    post:
+      description: Logout endpoint for client-side JWT invalidation
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Logout successful
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Logout user
+      tags:
+      - authentication
+  /auth/mock-callback:
+    get:
+      description: Development-only endpoint that bypasses OAuth2 and directly issues
+        JWT for testing
+      parameters:
+      - description: User email
+        in: query
+        name: email
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Redirects to frontend with token
+          schema:
+            type: string
+        "400":
+          description: Missing email
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: User not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Mock authentication callback (DEV ONLY)
+      tags:
+      - authentication
+  /drift-events/{drift_id}/compare:
+    get:
+      consumes:
+      - application/json
+      description: Get side-by-side comparison of Git and Kubernetes versions for
+        a drift event
+      parameters:
+      - description: Drift Event ID (UUID)
+        in: path
+        name: drift_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Side-by-side comparison
+          schema:
+            $ref: '#/definitions/internal_api.DriftComparisonResponse'
+        "400":
+          description: Invalid drift event ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Drift event not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Drift detector not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get drift comparison
+      tags:
+      - drift
+  /drift-events/{drift_id}/import-to-git:
+    post:
+      consumes:
+      - application/json
+      description: Resolves drift by committing Kubernetes secret version to Git
+      parameters:
+      - description: Drift Event ID (UUID)
+        in: path
+        name: drift_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Import successful
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid drift event ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Drift detector not available
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Import from K8s to Git
+      tags:
+      - drift
+  /drift-events/{drift_id}/mark-resolved:
+    post:
+      consumes:
+      - application/json
+      description: Mark drift event as resolved without syncing (manual resolution)
+      parameters:
+      - description: Drift Event ID (UUID)
+        in: path
+        name: drift_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Drift marked as resolved
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid drift event ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Drift detector not available
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Mark drift as resolved
+      tags:
+      - drift
+  /drift-events/{drift_id}/sync-from-git:
+    post:
+      consumes:
+      - application/json
+      description: Resolves drift by overwriting Kubernetes secret with Git version
+      parameters:
+      - description: Drift Event ID (UUID)
+        in: path
+        name: drift_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sync successful
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid drift event ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Drift detector not available
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Sync from Git to K8s
+      tags:
+      - drift
+  /drift/check-all:
+    post:
+      consumes:
+      - application/json
+      description: Admin endpoint to trigger drift detection across all namespaces
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Drift check results for all namespaces
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check drift for all namespaces
+      tags:
+      - drift
+  /namespaces:
+    get:
+      consumes:
+      - application/json
+      description: Get all namespaces the authenticated user has access to via their
+        groups
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of namespaces
+          schema:
+            items:
+              $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+            type: array
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List accessible namespaces
+      tags:
+      - namespaces
+  /namespaces/{namespace}/drift-check:
+    post:
+      consumes:
+      - application/json
+      description: Manually trigger drift detection for all published secrets in a
+        namespace
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Drift check results
+          schema:
+            $ref: '#/definitions/internal_api.DriftCheckResponse'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Drift detection failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Trigger drift detection
+      tags:
+      - drift
+  /namespaces/{namespace}/drift-events:
+    get:
+      consumes:
+      - application/json
+      description: Get all drift events for a namespace with filtering and pagination
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Filter by status (resolved, active)
+        in: query
+        name: status
+        type: string
+      - description: Filter by secret name
+        in: query
+        name: secret_name
+        type: string
+      - default: 50
+        description: Results per page (max 100)
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Pagination offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of drift events
+          schema:
+            $ref: '#/definitions/internal_api.DriftEventsResponse'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List drift events
+      tags:
+      - drift
+  /namespaces/{namespace}/k8s-secrets:
+    get:
+      consumes:
+      - application/json
+      description: List all secrets currently deployed in the Kubernetes namespace
+        (metadata only, no values)
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of Kubernetes secrets
+          schema:
+            $ref: '#/definitions/internal_api.K8sSecretsListResponse'
+        "404":
+          description: Namespace not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Kubernetes cluster not available
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List Kubernetes secrets
+      tags:
+      - kubernetes
+  /namespaces/{namespace}/k8s-secrets/{name}:
+    get:
+      consumes:
+      - application/json
+      description: Get metadata for a specific Kubernetes secret (keys only, no values)
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Kubernetes secret metadata
+          schema:
+            $ref: '#/definitions/internal_api.K8sSecretInfo'
+        "404":
+          description: Namespace or secret not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Kubernetes cluster not available
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get Kubernetes secret details
+      tags:
+      - kubernetes
+  /namespaces/{namespace}/secrets:
+    get:
+      consumes:
+      - application/json
+      description: Get all secrets in a namespace with optional status filter
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Filter by status (draft, published, drifted)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of secrets
+          schema:
+            items:
+              $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+            type: array
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List secrets in namespace
+      tags:
+      - secrets
+    post:
+      consumes:
+      - application/json
+      description: Creates a new secret draft in the specified namespace
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret data
+        in: body
+        name: secret
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.CreateSecretRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created secret
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Secret already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a new secret
+      tags:
+      - secrets
+  /namespaces/{namespace}/secrets/{name}:
+    delete:
+      consumes:
+      - application/json
+      description: 'Delete a secret from the database. Note: Deleting published secrets
+        may cause drift.'
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Secret deleted successfully
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Secret not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete secret
+      tags:
+      - secrets
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a specific secret by name from a namespace
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Secret details
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Secret not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get secret by name
+      tags:
+      - secrets
+    put:
+      consumes:
+      - application/json
+      description: Update secret data. Reverts published/drifted secrets to draft
+        status automatically.
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Updated secret data
+        in: body
+        name: secret
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.UpdateSecretRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated secret
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Secret not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update secret
+      tags:
+      - secrets
+  /namespaces/{namespace}/secrets/{name}/publish:
+    post:
+      consumes:
+      - application/json
+      description: Encrypts secret with SOPS and commits to Git repository for GitOps
+        sync to Kubernetes
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Published secret with commit SHA
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace or secret not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Secret has unresolved drift
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Git or SOPS not configured
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Publish secret to Git
+      tags:
+      - secrets
+  /namespaces/{namespace}/secrets/{name}/unpublish:
+    post:
+      consumes:
+      - application/json
+      description: Removes secret from Git repository and reverts status to draft
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Secret name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Unpublished secret
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.SecretDraft'
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Authentication required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace or secret not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Secret is not published
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Unpublish secret from Git
+      tags:
+      - secrets
+  /namespaces/{namespace}/sync-status:
+    get:
+      consumes:
+      - application/json
+      description: Get GitOps synchronization status between Git and Kubernetes via
+        FluxCD
+      parameters:
+      - description: Namespace ID (UUID)
+        in: path
+        name: namespace
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sync status details
+          schema:
+            $ref: '#/definitions/internal_api.NamespaceSyncStatus'
+        "400":
+          description: Invalid namespace ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Namespace not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get FluxCD sync status
+      tags:
+      - sync
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

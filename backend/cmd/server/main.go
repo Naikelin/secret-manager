@@ -24,7 +24,30 @@ import (
 	"gorm.io/gorm"
 	"strconv"
 	"strings"
+
+	_ "github.com/yourorg/secret-manager/docs" // Import generated docs
 )
+
+// @title Secret Manager API
+// @version 1.0
+// @description Production-ready secret management with drift detection and GitOps integration
+// @termsOfService https://github.com/yourorg/secret-manager
+
+// @contact.name API Support
+// @contact.url https://github.com/yourorg/secret-manager/issues
+// @contact.email support@example.com
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /api/v1
+// @schemes http https
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
 
 func main() {
 	// Load configuration

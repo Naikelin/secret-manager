@@ -45,6 +45,21 @@ type UpdateSecretRequest struct {
 }
 
 // CreateSecret handles POST /api/v1/namespaces/{namespace}/secrets
+// @Summary Create a new secret
+// @Description Creates a new secret draft in the specified namespace
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param secret body CreateSecretRequest true "Secret data"
+// @Success 201 {object} models.SecretDraft "Created secret"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 401 {object} map[string]string "Authentication required"
+// @Failure 404 {object} map[string]string "Namespace not found"
+// @Failure 409 {object} map[string]string "Secret already exists"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets [post]
 func (h *SecretHandlers) CreateSecret(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	namespaceIDStr := chi.URLParam(r, "namespace")
@@ -126,6 +141,19 @@ func (h *SecretHandlers) CreateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListSecrets handles GET /api/v1/namespaces/{namespace}/secrets
+// @Summary List secrets in namespace
+// @Description Get all secrets in a namespace with optional status filter
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param status query string false "Filter by status (draft, published, drifted)"
+// @Success 200 {array} models.SecretDraft "List of secrets"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 404 {object} map[string]string "Namespace not found"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets [get]
 func (h *SecretHandlers) ListSecrets(w http.ResponseWriter, r *http.Request) {
 	namespaceIDStr := chi.URLParam(r, "namespace")
 
@@ -178,6 +206,19 @@ func (h *SecretHandlers) ListSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSecret handles GET /api/v1/namespaces/{namespace}/secrets/{name}
+// @Summary Get secret by name
+// @Description Retrieve a specific secret by name from a namespace
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param name path string true "Secret name"
+// @Success 200 {object} models.SecretDraft "Secret details"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 404 {object} map[string]string "Secret not found"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets/{name} [get]
 func (h *SecretHandlers) GetSecret(w http.ResponseWriter, r *http.Request) {
 	namespaceIDStr := chi.URLParam(r, "namespace")
 	secretName := chi.URLParam(r, "name")
@@ -206,6 +247,21 @@ func (h *SecretHandlers) GetSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateSecret handles PUT /api/v1/namespaces/{namespace}/secrets/{name}
+// @Summary Update secret
+// @Description Update secret data. Reverts published/drifted secrets to draft status automatically.
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param name path string true "Secret name"
+// @Param secret body UpdateSecretRequest true "Updated secret data"
+// @Success 200 {object} models.SecretDraft "Updated secret"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 401 {object} map[string]string "Authentication required"
+// @Failure 404 {object} map[string]string "Secret not found"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets/{name} [put]
 func (h *SecretHandlers) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	namespaceIDStr := chi.URLParam(r, "namespace")
@@ -307,6 +363,20 @@ func (h *SecretHandlers) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteSecret handles DELETE /api/v1/namespaces/{namespace}/secrets/{name}
+// @Summary Delete secret
+// @Description Delete a secret from the database. Note: Deleting published secrets may cause drift.
+// @Tags secrets
+// @Accept json
+// @Produce json
+// @Param namespace path string true "Namespace ID (UUID)"
+// @Param name path string true "Secret name"
+// @Success 204 "Secret deleted successfully"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 401 {object} map[string]string "Authentication required"
+// @Failure 404 {object} map[string]string "Secret not found"
+// @Failure 500 {object} map[string]string "Server error"
+// @Security BearerAuth
+// @Router /namespaces/{namespace}/secrets/{name} [delete]
 func (h *SecretHandlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	namespaceIDStr := chi.URLParam(r, "namespace")

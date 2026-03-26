@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/uuid"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"github.com/yourorg/secret-manager/internal/config"
 	"github.com/yourorg/secret-manager/internal/drift"
 	"github.com/yourorg/secret-manager/internal/flux"
@@ -41,6 +42,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 			"status": "ok",
 		})
 	})
+
+	// Swagger UI endpoint
+	r.Get("/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("/swagger/doc.json"),
+	))
 
 	// Initialize handlers
 	authHandlers := NewAuthHandlers(db, cfg)
