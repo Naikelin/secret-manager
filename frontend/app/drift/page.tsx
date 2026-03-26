@@ -217,7 +217,6 @@ export default function DriftPage() {
               {driftEvents.map((event) => {
                 const isExpanded = expandedEventId === event.id;
                 const driftType = getDriftType(event);
-                console.log('[DriftPage] Event ID:', event.id, 'isExpanded:', isExpanded, 'expandedEventId:', expandedEventId);
                 
                 return (
                   <div key={event.id} className="transition-colors duration-150">
@@ -228,7 +227,6 @@ export default function DriftPage() {
                           <div className="flex items-center gap-3 mb-3">
                             <button
                               onClick={() => {
-                                console.log('[DriftPage] Expand button clicked. Current:', expandedEventId, 'New:', isExpanded ? null : event.id);
                                 setExpandedEventId(isExpanded ? null : event.id);
                               }}
                               className="text-2xl hover:scale-110 transition-transform duration-200"
@@ -320,7 +318,6 @@ export default function DriftPage() {
                             <span>🔍</span>
                             Visual Comparison
                           </h4>
-                          {console.log('[DriftPage] Rendering DriftComparison for event:', event.id)}
                           <DriftComparison driftEventId={event.id} />
                         </div>
                       </div>

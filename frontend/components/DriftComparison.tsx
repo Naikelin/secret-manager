@@ -9,8 +9,6 @@ interface DriftComparisonProps {
 }
 
 export function DriftComparison({ driftEventId }: DriftComparisonProps) {
-  console.log('[DriftComparison] Component mounted with driftEventId:', driftEventId);
-  
   const [gitData, setGitData] = useState<Record<string, string>>({});
   const [k8sData, setK8sData] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -18,16 +16,13 @@ export function DriftComparison({ driftEventId }: DriftComparisonProps) {
   const [showValues, setShowValues] = useState(false);
 
   useEffect(() => {
-    console.log('[DriftComparison] useEffect triggered, loading comparison...');
     loadComparison();
   }, [driftEventId]);
 
   async function loadComparison() {
     try {
-      console.log('[DriftComparison] Starting API call for driftEventId:', driftEventId);
       setLoading(true);
       const data = await api.getDriftComparison(driftEventId);
-      console.log('[DriftComparison] API response received:', data);
       setGitData(data.git_data || {});
       setK8sData(data.k8s_data || {});
     } catch (err) {
@@ -36,7 +31,6 @@ export function DriftComparison({ driftEventId }: DriftComparisonProps) {
       setError(errorMessage);
     } finally {
       setLoading(false);
-      console.log('[DriftComparison] Loading complete');
     }
   }
 
@@ -54,7 +48,6 @@ export function DriftComparison({ driftEventId }: DriftComparisonProps) {
   }
 
   if (loading) {
-    console.log('[DriftComparison] Rendering loading state');
     return (
       <div className="flex items-center justify-center p-8">
         <div className="text-center">
@@ -66,19 +59,12 @@ export function DriftComparison({ driftEventId }: DriftComparisonProps) {
   }
 
   if (error) {
-    console.log('[DriftComparison] Rendering error state:', error);
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
         <p className="text-red-700 text-sm">❌ {error}</p>
       </div>
     );
   }
-
-  console.log('[DriftComparison] Rendering diff view with data:', {
-    gitKeys: Object.keys(gitData).length,
-    k8sKeys: Object.keys(k8sData).length,
-    showValues
-  });
 
   const gitFormatted = formatData(gitData, !showValues);
   const k8sFormatted = formatData(k8sData, !showValues);
