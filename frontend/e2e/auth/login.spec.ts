@@ -30,7 +30,7 @@ function generateTestJWT(): string {
   
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    user_id: generateUUID(),
+    user_id: '00000000-0000-0000-0000-000000000001', // Fixed user ID from seed data (admin@example.com)
     email: 'admin@example.com',
     name: 'Test Admin',
     groups: ['admin'],

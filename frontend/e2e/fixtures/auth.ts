@@ -33,7 +33,7 @@ function generateTestJWT(): string {
   // JWT payload with all required claims
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    user_id: generateUUID(),
+    user_id: '00000000-0000-0000-0000-000000000001', // Fixed user ID from seed data (admin@example.com)
     email: 'admin@example.com',
     name: 'Test Admin',
     groups: ['admin'],
@@ -61,9 +61,9 @@ function generateTestJWT(): string {
   return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
 
-// Test user data (matches JWT payload)
+// Test user data (matches JWT payload and seed data)
 const testUser = {
-  id: generateUUID(),
+  id: '00000000-0000-0000-0000-000000000001', // Fixed user ID from seed data
   email: 'admin@example.com',
   name: 'Test Admin'
 };
