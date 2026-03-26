@@ -110,7 +110,20 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 			fmt.Printf("[INIT] Webhook notifications enabled for drift detection\n")
 		}
 
-		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient)
+		// Initialize FluxClient
+		var fluxClient *flux.FluxClient
+		var err error
+		if k8sClient != nil {
+			fluxClient, err = flux.NewFluxClient(cfg.K8sKubeconfig)
+			if err != nil {
+				fmt.Printf("[WARN] Failed to initialize Flux client: %v\n", err)
+				fluxClient = nil
+			} else {
+				fmt.Printf("[INIT] Flux client initialized successfully\n")
+			}
+		}
+
+		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient, fluxClient, cfg)
 	}
 	driftHandlers := NewDriftHandlers(db, driftDetector)
 	driftResolutionHandlers := NewDriftResolutionHandlers(db, driftDetector)

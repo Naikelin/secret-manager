@@ -13,7 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yourorg/secret-manager/internal/config"
 	"github.com/yourorg/secret-manager/internal/drift"
+	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -104,17 +106,79 @@ func (m *driftMockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, 
 	return nil, fmt.Errorf("secret not found")
 }
 
-func (m *driftMockK8sClient) ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error {
-	if m.applySecretFunc != nil {
-		return m.applySecretFunc(ctx, namespace, secret)
-	}
-	return nil
-}
-
 // setupDriftTestDB creates an in-memory database for drift testing
 func setupDriftTestDB(t *testing.T) *gorm.DB {
 	// Reuse the existing setupTestDB from secrets_test.go which has proper SQLite table creation
 	return setupTestDB(t)
+}
+
+// driftMockFluxClient for testing
+type driftMockFluxClient struct {
+	triggerKustomizationFunc   func(ctx context.Context, name, namespace string) error
+	triggerGitRepositoryFunc   func(ctx context.Context, name, namespace string) error
+	waitForReconciliationFunc  func(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error
+	getKustomizationStatusFunc func(name, namespace string) (*flux.KustomizationStatus, error)
+}
+
+func (m *driftMockFluxClient) TriggerKustomizationReconciliation(ctx context.Context, name, namespace string) error {
+	if m.triggerKustomizationFunc != nil {
+		return m.triggerKustomizationFunc(ctx, name, namespace)
+	}
+	return nil
+}
+
+func (m *driftMockFluxClient) TriggerGitRepositoryReconciliation(ctx context.Context, name, namespace string) error {
+	if m.triggerGitRepositoryFunc != nil {
+		return m.triggerGitRepositoryFunc(ctx, name, namespace)
+	}
+	return nil
+}
+
+func (m *driftMockFluxClient) WaitForKustomizationReconciliation(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error {
+	if m.waitForReconciliationFunc != nil {
+		return m.waitForReconciliationFunc(ctx, name, namespace, timeout, pollInterval)
+	}
+	return nil
+}
+
+func (m *driftMockFluxClient) GetKustomizationStatus(name, namespace string) (*flux.KustomizationStatus, error) {
+	if m.getKustomizationStatusFunc != nil {
+		return m.getKustomizationStatusFunc(name, namespace)
+	}
+	return &flux.KustomizationStatus{Ready: true}, nil
+}
+
+// getTestConfigForAPI returns a config with sensible test defaults
+func getTestConfigForAPI() *config.Config {
+	return &config.Config{
+		FluxKustomizationName: "secrets",
+		FluxKustomizationNS:   "flux-system",
+		FluxGitRepositoryName: "secrets-repo",
+		FluxReconcileTimeout:  2 * time.Minute,
+		FluxPollInterval:      2 * time.Second,
+	}
+}
+
+// getTestFluxClientForAPI returns a mock FluxClient that succeeds by default
+func getTestFluxClientForAPI() drift.FluxClientInterface {
+	return &driftMockFluxClient{
+		triggerKustomizationFunc: func(ctx context.Context, name, namespace string) error {
+			return nil
+		},
+		triggerGitRepositoryFunc: func(ctx context.Context, name, namespace string) error {
+			return nil
+		},
+		waitForReconciliationFunc: func(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error {
+			return nil
+		},
+		getKustomizationStatusFunc: func(name, namespace string) (*flux.KustomizationStatus, error) {
+			return &flux.KustomizationStatus{
+				Name:      name,
+				Namespace: namespace,
+				Ready:     true,
+			}, nil
+		},
+	}
 }
 
 // TestTriggerDriftCheck_Success tests successful drift check
@@ -184,7 +248,7 @@ data:
 	}
 
 	// Create drift detector
-	detector := drift.NewDriftDetector(db, mockK8sClient, mockGitClient, mockSOPSClient, nil)
+	detector := drift.NewDriftDetector(db, mockK8sClient, mockGitClient, mockSOPSClient, nil, getTestFluxClientForAPI(), getTestConfigForAPI())
 	handlers := NewDriftHandlers(db, detector)
 
 	// Create request
@@ -215,7 +279,7 @@ func TestTriggerDriftCheck_NamespaceNotFound(t *testing.T) {
 	db := setupDriftTestDB(t)
 
 	// Create dummy drift detector
-	detector := drift.NewDriftDetector(db, nil, nil, nil, nil)
+	detector := drift.NewDriftDetector(db, nil, nil, nil, nil, nil, getTestConfigForAPI())
 	handlers := NewDriftHandlers(db, detector)
 
 	// Create request with non-existent namespace
@@ -238,7 +302,7 @@ func TestTriggerDriftCheck_InvalidNamespaceID(t *testing.T) {
 	db := setupDriftTestDB(t)
 
 	// Create dummy drift detector
-	detector := drift.NewDriftDetector(db, nil, nil, nil, nil)
+	detector := drift.NewDriftDetector(db, nil, nil, nil, nil, nil, getTestConfigForAPI())
 	handlers := NewDriftHandlers(db, detector)
 
 	// Create request with invalid UUID

@@ -2,12 +2,15 @@ package flux
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/yourorg/secret-manager/pkg/logger"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -185,4 +188,120 @@ func extractCommitSHA(revision string) string {
 
 	// If no special format, return as is (might be just the commit SHA)
 	return revision
+}
+
+// TriggerKustomizationReconciliation triggers immediate reconciliation of a Kustomization
+// by patching it with the reconcile.fluxcd.io/requestedAt annotation
+func (c *FluxClient) TriggerKustomizationReconciliation(ctx context.Context, name, namespace string) error {
+	gvr := schema.GroupVersionResource{
+		Group:    "kustomize.toolkit.fluxcd.io",
+		Version:  "v1",
+		Resource: "kustomizations",
+	}
+
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{
+				"reconcile.fluxcd.io/requestedAt": time.Now().Format(time.RFC3339Nano),
+			},
+		},
+	}
+
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	_, err = c.dynamicClient.Resource(gvr).Namespace(namespace).
+		Patch(ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to patch Kustomization: %w", err)
+	}
+
+	logger.Info("Triggered Kustomization reconciliation", "name", name, "namespace", namespace)
+	return nil
+}
+
+// TriggerGitRepositoryReconciliation triggers immediate reconciliation of a GitRepository
+func (c *FluxClient) TriggerGitRepositoryReconciliation(ctx context.Context, name, namespace string) error {
+	gvr := schema.GroupVersionResource{
+		Group:    "source.toolkit.fluxcd.io",
+		Version:  "v1",
+		Resource: "gitrepositories",
+	}
+
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{
+				"reconcile.fluxcd.io/requestedAt": time.Now().Format(time.RFC3339Nano),
+			},
+		},
+	}
+
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	_, err = c.dynamicClient.Resource(gvr).Namespace(namespace).
+		Patch(ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to patch GitRepository: %w", err)
+	}
+
+	logger.Info("Triggered GitRepository reconciliation", "name", name, "namespace", namespace)
+	return nil
+}
+
+// WaitForKustomizationReconciliation polls Kustomization status until reconciliation completes or times out
+func (c *FluxClient) WaitForKustomizationReconciliation(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	logger.Info("Waiting for Kustomization reconciliation", "name", name, "timeout", timeout)
+
+	for time.Now().Before(deadline) {
+		status, err := c.GetKustomizationStatus(name, namespace)
+		if err != nil {
+			logger.Warn("Failed to get Kustomization status", "error", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// Check if Ready condition is True
+		if status.Ready {
+			logger.Info("Kustomization reconciliation complete", "name", name, "revision", status.LastAppliedCommit)
+			return nil
+		}
+
+		// Log progress
+		logger.Debug("Kustomization not ready yet", "name", name, "ready", status.Ready)
+
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for Kustomization reconciliation after %v", timeout)
+}
+
+// GetKustomizationGeneration retrieves the current generation and observedGeneration
+// Used to verify reconciliation completion
+func (c *FluxClient) GetKustomizationGeneration(ctx context.Context, name, namespace string) (generation int64, observedGeneration int64, err error) {
+	gvr := schema.GroupVersionResource{
+		Group:    "kustomize.toolkit.fluxcd.io",
+		Version:  "v1",
+		Resource: "kustomizations",
+	}
+
+	obj, err := c.dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get Kustomization: %w", err)
+	}
+
+	generation = obj.GetGeneration()
+
+	observedGen, found, err := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
+	if err != nil || !found {
+		return generation, 0, fmt.Errorf("observedGeneration not found in status")
+	}
+
+	return generation, observedGen, nil
 }

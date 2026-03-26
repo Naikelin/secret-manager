@@ -15,6 +15,7 @@ import (
 	"github.com/yourorg/secret-manager/internal/config"
 	"github.com/yourorg/secret-manager/internal/database"
 	"github.com/yourorg/secret-manager/internal/drift"
+	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/git"
 	"github.com/yourorg/secret-manager/internal/gitsync"
 	"github.com/yourorg/secret-manager/internal/k8s"
@@ -113,7 +114,19 @@ func main() {
 			logger.Info("Webhook notifications enabled for drift detection", "url", webhookURL)
 		}
 
-		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient)
+		// Initialize FluxClient if K8s client is available
+		var fluxClient *flux.FluxClient
+		if k8sClient != nil {
+			fluxClient, err = flux.NewFluxClient(cfg.K8sKubeconfig)
+			if err != nil {
+				logger.Warn("Failed to initialize Flux client", "error", err)
+				fluxClient = nil
+			} else {
+				logger.Info("Flux client initialized successfully")
+			}
+		}
+
+		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient, fluxClient, cfg)
 		logger.Info("Drift detector initialized successfully")
 	} else {
 		logger.Warn("Drift detector not initialized - some clients are unavailable")

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -38,6 +39,13 @@ type Config struct {
 	SOPSAgeKeyPath  string
 	SOPSKMSKeyARN   string
 	SOPSConfigPath  string
+
+	// FluxCD configuration
+	FluxKustomizationName string        `env:"FLUX_KUSTOMIZATION_NAME" envDefault:"secrets"`
+	FluxKustomizationNS   string        `env:"FLUX_KUSTOMIZATION_NS" envDefault:"flux-system"`
+	FluxGitRepositoryName string        `env:"FLUX_GITREPOSITORY_NAME" envDefault:"secrets-repo"`
+	FluxReconcileTimeout  time.Duration `env:"FLUX_RECONCILE_TIMEOUT" envDefault:"2m"`
+	FluxPollInterval      time.Duration `env:"FLUX_POLL_INTERVAL" envDefault:"2s"`
 }
 
 // Load reads configuration from environment variables
@@ -73,6 +81,13 @@ func Load() (*Config, error) {
 		SOPSAgeKeyPath:  getEnv("SOPS_AGE_KEY_PATH", "/app/.age/keys.txt"),
 		SOPSKMSKeyARN:   getEnv("SOPS_KMS_KEY_ARN", ""),
 		SOPSConfigPath:  getEnv("SOPS_CONFIG_PATH", ".sops.yaml"),
+
+		// FluxCD configuration
+		FluxKustomizationName: getEnv("FLUX_KUSTOMIZATION_NAME", "secrets"),
+		FluxKustomizationNS:   getEnv("FLUX_KUSTOMIZATION_NS", "flux-system"),
+		FluxGitRepositoryName: getEnv("FLUX_GITREPOSITORY_NAME", "secrets-repo"),
+		FluxReconcileTimeout:  getEnvDuration("FLUX_RECONCILE_TIMEOUT", 2*time.Minute),
+		FluxPollInterval:      getEnvDuration("FLUX_POLL_INTERVAL", 2*time.Second),
 	}
 
 	return cfg, nil
@@ -133,5 +148,21 @@ func getEnvBool(key string, defaultValue bool) bool {
 			return boolValue
 		}
 	}
+	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+
+	// Try parsing as duration string (e.g., "5m", "2m", "30s")
+	duration, err := time.ParseDuration(value)
+	if err == nil {
+		return duration
+	}
+
+	// If parsing fails, return default
 	return defaultValue
 }

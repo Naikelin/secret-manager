@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yourorg/secret-manager/internal/config"
+	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/k8s"
 	"github.com/yourorg/secret-manager/internal/models"
 	"github.com/yourorg/secret-manager/internal/notifications"
@@ -38,7 +40,14 @@ type SOPSClientInterface interface {
 // K8sClientInterface defines the Kubernetes operations needed for drift detection
 type K8sClientInterface interface {
 	GetSecret(namespace, name string) (*corev1.Secret, error)
-	ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error
+}
+
+// FluxClientInterface defines the FluxCD operations needed for drift detection
+type FluxClientInterface interface {
+	TriggerKustomizationReconciliation(ctx context.Context, name, namespace string) error
+	TriggerGitRepositoryReconciliation(ctx context.Context, name, namespace string) error
+	WaitForKustomizationReconciliation(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error
+	GetKustomizationStatus(name, namespace string) (*flux.KustomizationStatus, error)
 }
 
 // DriftDetector detects drift between Git (source of truth) and Kubernetes (actual state)
@@ -48,16 +57,20 @@ type DriftDetector struct {
 	gitClient     GitClientInterface
 	sopsClient    SOPSClientInterface
 	webhookClient *notifications.WebhookClient
+	fluxClient    FluxClientInterface
+	cfg           *config.Config
 }
 
 // NewDriftDetector creates a new DriftDetector instance
-func NewDriftDetector(db *gorm.DB, k8sClient K8sClientInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface, webhookClient *notifications.WebhookClient) *DriftDetector {
+func NewDriftDetector(db *gorm.DB, k8sClient K8sClientInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface, webhookClient *notifications.WebhookClient, fluxClient FluxClientInterface, cfg *config.Config) *DriftDetector {
 	return &DriftDetector{
 		db:            db,
 		k8sClient:     k8sClient,
 		gitClient:     gitClient,
 		sopsClient:    sopsClient,
 		webhookClient: webhookClient,
+		fluxClient:    fluxClient,
+		cfg:           cfg,
 	}
 }
 
@@ -377,18 +390,55 @@ func (d *DriftDetector) SyncFromGit(ctx context.Context, driftEventID uuid.UUID)
 		return fmt.Errorf("failed to decrypt secret: %w", err)
 	}
 
-	// 5. Parse K8s Secret from YAML
-	k8sSecret, err := parseSecretYAML(decryptedYAML)
+	// 5. Validate that decrypted YAML is valid K8s Secret format
+	_, err = parseSecretYAML(decryptedYAML)
 	if err != nil {
 		return fmt.Errorf("failed to parse secret YAML: %w", err)
 	}
 
-	// 6. Apply to K8s cluster
-	if err := d.k8sClient.ApplySecret(ctx, namespace.Name, k8sSecret); err != nil {
-		return fmt.Errorf("failed to apply secret to Kubernetes: %w", err)
+	// 6. Trigger FluxCD reconciliation (GitOps approach)
+	if d.fluxClient == nil {
+		return fmt.Errorf("FluxClient not available - cannot trigger GitOps reconciliation")
 	}
 
-	// 7. Mark drift event as resolved
+	// First, trigger GitRepository reconciliation to fetch latest Git content
+	logger.Info("Triggering GitRepository reconciliation to fetch latest Git content")
+	if err := d.fluxClient.TriggerGitRepositoryReconciliation(ctx, d.cfg.FluxGitRepositoryName, d.cfg.FluxKustomizationNS); err != nil {
+		logger.Error("Failed to trigger GitRepository reconciliation", "error", err)
+		return fmt.Errorf("failed to trigger GitRepository reconciliation: %w", err)
+	}
+
+	// Wait briefly for GitRepository to fetch
+	logger.Info("Waiting for GitRepository to fetch latest content")
+	time.Sleep(5 * time.Second)
+
+	// Then trigger Kustomization reconciliation to apply secrets
+	logger.Info("Triggering Kustomization reconciliation to apply secrets")
+	if err := d.fluxClient.TriggerKustomizationReconciliation(ctx, d.cfg.FluxKustomizationName, d.cfg.FluxKustomizationNS); err != nil {
+		logger.Error("Failed to trigger Kustomization reconciliation", "error", err)
+		return fmt.Errorf("failed to trigger Kustomization reconciliation: %w", err)
+	}
+
+	// Wait for Kustomization reconciliation to complete
+	logger.Info("Waiting for Kustomization reconciliation to complete", "timeout", d.cfg.FluxReconcileTimeout)
+	if err := d.fluxClient.WaitForKustomizationReconciliation(ctx, d.cfg.FluxKustomizationName, d.cfg.FluxKustomizationNS, d.cfg.FluxReconcileTimeout, d.cfg.FluxPollInterval); err != nil {
+		logger.Error("Flux reconciliation timeout", "error", err)
+		return fmt.Errorf("Flux reconciliation timeout: %w", err)
+	}
+
+	// 7. Verify secret was applied to K8s by Flux
+	logger.Info("Verifying secret exists in Kubernetes after Flux sync", "namespace", namespace.Name, "secret", driftEvent.SecretName)
+	_, err = d.k8sClient.GetSecret(namespace.Name, driftEvent.SecretName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("secret not found in K8s after Flux reconciliation - Flux may have failed to apply")
+		}
+		return fmt.Errorf("failed to verify secret in K8s: %w", err)
+	}
+
+	logger.Info("Secret successfully synced from Git via FluxCD", "namespace", namespace.Name, "secret", driftEvent.SecretName)
+
+	// 8. Mark drift event as resolved
 	now := time.Now()
 	resolutionAction := "sync_from_git"
 	driftEvent.ResolvedAt = &now
@@ -397,7 +447,7 @@ func (d *DriftDetector) SyncFromGit(ctx context.Context, driftEventID uuid.UUID)
 		return fmt.Errorf("failed to update drift event: %w", err)
 	}
 
-	// 8. Update secret status back to published
+	// 9. Update secret status back to published
 	var secret models.SecretDraft
 	if err := d.db.Where("namespace_id = ? AND secret_name = ?", driftEvent.NamespaceID, driftEvent.SecretName).
 		First(&secret).Error; err == nil {
@@ -406,7 +456,7 @@ func (d *DriftDetector) SyncFromGit(ctx context.Context, driftEventID uuid.UUID)
 		}
 	}
 
-	// 9. Create audit log entry
+	// 10. Create audit log entry
 	auditLog := models.AuditLog{
 		ActionType:   "drift_sync_from_git",
 		ResourceType: "secret",

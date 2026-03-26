@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yourorg/secret-manager/internal/config"
+	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/models"
 	"github.com/yourorg/secret-manager/pkg/logger"
 	"gorm.io/datatypes"
@@ -98,8 +101,7 @@ func (m *MockSOPSClient) EncryptYAML(yamlContent []byte) ([]byte, error) {
 
 // MockK8sClient for testing
 type MockK8sClient struct {
-	GetSecretFunc   func(namespace, name string) (*corev1.Secret, error)
-	ApplySecretFunc func(ctx context.Context, namespace string, secret *corev1.Secret) error
+	GetSecretFunc func(namespace, name string) (*corev1.Secret, error)
 }
 
 func (m *MockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, error) {
@@ -109,11 +111,44 @@ func (m *MockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, error
 	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
 }
 
-func (m *MockK8sClient) ApplySecret(ctx context.Context, namespace string, secret *corev1.Secret) error {
-	if m.ApplySecretFunc != nil {
-		return m.ApplySecretFunc(ctx, namespace, secret)
+// MockFluxClient for testing
+type MockFluxClient struct {
+	TriggerKustomizationReconciliationFunc func(ctx context.Context, name, namespace string) error
+	TriggerGitRepositoryReconciliationFunc func(ctx context.Context, name, namespace string) error
+	WaitForKustomizationReconciliationFunc func(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error
+	GetKustomizationStatusFunc             func(name, namespace string) (*flux.KustomizationStatus, error)
+}
+
+func (m *MockFluxClient) TriggerKustomizationReconciliation(ctx context.Context, name, namespace string) error {
+	if m.TriggerKustomizationReconciliationFunc != nil {
+		return m.TriggerKustomizationReconciliationFunc(ctx, name, namespace)
 	}
 	return nil
+}
+
+func (m *MockFluxClient) TriggerGitRepositoryReconciliation(ctx context.Context, name, namespace string) error {
+	if m.TriggerGitRepositoryReconciliationFunc != nil {
+		return m.TriggerGitRepositoryReconciliationFunc(ctx, name, namespace)
+	}
+	return nil
+}
+
+func (m *MockFluxClient) WaitForKustomizationReconciliation(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error {
+	if m.WaitForKustomizationReconciliationFunc != nil {
+		return m.WaitForKustomizationReconciliationFunc(ctx, name, namespace, timeout, pollInterval)
+	}
+	return nil
+}
+
+func (m *MockFluxClient) GetKustomizationStatus(name, namespace string) (*flux.KustomizationStatus, error) {
+	if m.GetKustomizationStatusFunc != nil {
+		return m.GetKustomizationStatusFunc(name, namespace)
+	}
+	return &flux.KustomizationStatus{
+		Name:      name,
+		Namespace: namespace,
+		Ready:     true,
+	}, nil
 }
 
 // setupTestDB creates an in-memory SQLite database for testing
@@ -199,6 +234,39 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// getTestConfig returns a config with sensible test defaults
+func getTestConfig() *config.Config {
+	return &config.Config{
+		FluxKustomizationName: "secrets",
+		FluxKustomizationNS:   "flux-system",
+		FluxGitRepositoryName: "secrets-repo",
+		FluxReconcileTimeout:  2 * time.Minute,
+		FluxPollInterval:      2 * time.Second,
+	}
+}
+
+// getTestFluxClient returns a mock FluxClient that succeeds by default
+func getTestFluxClient() *MockFluxClient {
+	return &MockFluxClient{
+		TriggerKustomizationReconciliationFunc: func(ctx context.Context, name, namespace string) error {
+			return nil
+		},
+		TriggerGitRepositoryReconciliationFunc: func(ctx context.Context, name, namespace string) error {
+			return nil
+		},
+		WaitForKustomizationReconciliationFunc: func(ctx context.Context, name, namespace string, timeout, pollInterval time.Duration) error {
+			return nil
+		},
+		GetKustomizationStatusFunc: func(name, namespace string) (*flux.KustomizationStatus, error) {
+			return &flux.KustomizationStatus{
+				Name:      name,
+				Namespace: namespace,
+				Ready:     true,
+			}, nil
+		},
+	}
+}
+
 // TestDetectDriftForSecret_NoChange tests drift detection when there's no drift
 func TestDetectDriftForSecret_NoChange(t *testing.T) {
 	db := setupTestDB(t)
@@ -260,7 +328,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -321,7 +389,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -375,7 +443,7 @@ func TestDetectDriftForSecret_GitFileMissing(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -421,7 +489,7 @@ func TestDetectDriftForSecret_DraftSecret(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -505,7 +573,7 @@ data:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift for entire namespace
 	events, err := detector.DetectDriftForNamespace(namespace.ID)
@@ -561,7 +629,7 @@ func TestDetectDriftForSecret_DecryptionError(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -631,7 +699,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)

@@ -76,24 +76,27 @@ data:
 		},
 	}
 
-	// Mock K8s client - verify apply was called with correct namespace
-	applyCalled := false
+	// Mock K8s client - GetSecret to verify secret exists after Flux sync
 	k8sClient := &MockK8sClient{
-		ApplySecretFunc: func(ctx context.Context, namespace string, secret *corev1.Secret) error {
-			assert.Equal(t, "test-ns", namespace)
-			// Just verify it was called - YAML parsing details are tested elsewhere
-			applyCalled = true
-			return nil
+		GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
+			// Return a valid secret to simulate that Flux applied it successfully
+			return &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Data: map[string][]byte{
+					"username": []byte("user"),
+					"password": []byte("pass"),
+				},
+			}, nil
 		},
 	}
 
 	// Create detector and sync
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.SyncFromGit(ctx, driftEvent.ID)
 	require.NoError(t, err)
-
-	// Verify secret was applied to K8s
-	assert.True(t, applyCalled, "ApplySecret should have been called")
 
 	// Verify drift event was marked as resolved
 	var updatedDrift models.DriftEvent
@@ -152,7 +155,7 @@ func TestSyncFromGit_GitFileNotFound(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and attempt sync
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.SyncFromGit(ctx, driftEvent.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read secret from Git")
@@ -193,7 +196,7 @@ func TestSyncFromGit_AlreadyResolved(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and attempt sync
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.SyncFromGit(ctx, driftEvent.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already resolved")
@@ -281,7 +284,7 @@ func TestImportToGit_Success(t *testing.T) {
 	}
 
 	// Create detector and import
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.ImportToGit(ctx, driftEvent.ID)
 	require.NoError(t, err)
 
@@ -347,7 +350,7 @@ func TestImportToGit_K8sSecretNotFound(t *testing.T) {
 	sopsClient := &MockSOPSClient{}
 
 	// Create detector and attempt import
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.ImportToGit(ctx, driftEvent.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get secret from Kubernetes")
@@ -402,7 +405,7 @@ func TestMarkResolved_Success(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and mark resolved
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.MarkResolved(ctx, driftEvent.ID, user.ID)
 	require.NoError(t, err)
 
@@ -439,7 +442,7 @@ func TestMarkResolved_DriftNotFound(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and attempt to mark non-existent drift
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 	err := detector.MarkResolved(ctx, uuid.New(), uuid.New())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load drift event")
