@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +19,18 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+// MockGitSync is a mock implementation of GitSyncInterface for testing
+type MockGitSync struct {
+	SyncSecretFunc func(namespaceName, secretName string) error
+}
+
+func (m *MockGitSync) SyncSecret(namespaceName, secretName string) error {
+	if m.SyncSecretFunc != nil {
+		return m.SyncSecretFunc(namespaceName, secretName)
+	}
+	return nil
+}
 
 // setupTestDB creates an in-memory SQLite database for testing
 func setupTestDB(t *testing.T) *gorm.DB {
@@ -179,7 +192,7 @@ func withUserContext(r *http.Request, userCtx *middleware.UserContext) *http.Req
 
 func TestCreateSecret(t *testing.T) {
 	db := setupTestDB(t)
-	handlers := NewSecretHandlers(db)
+	handlers := NewSecretHandlers(db, nil)
 	user, userCtx := createTestUser(t, db)
 	namespace := createTestNamespace(t, db)
 
@@ -365,7 +378,7 @@ func TestCreateSecret(t *testing.T) {
 
 func TestListSecrets(t *testing.T) {
 	db := setupTestDB(t)
-	handlers := NewSecretHandlers(db)
+	handlers := NewSecretHandlers(db, nil)
 	user, userCtx := createTestUser(t, db)
 	namespace := createTestNamespace(t, db)
 
@@ -470,7 +483,7 @@ func TestListSecrets(t *testing.T) {
 
 func TestGetSecret(t *testing.T) {
 	db := setupTestDB(t)
-	handlers := NewSecretHandlers(db)
+	handlers := NewSecretHandlers(db, nil)
 	user, userCtx := createTestUser(t, db)
 	namespace := createTestNamespace(t, db)
 	secret := createTestSecret(t, db, namespace.ID, "my-secret", "draft", &user.ID)
@@ -529,7 +542,7 @@ func TestGetSecret(t *testing.T) {
 
 func TestUpdateSecret(t *testing.T) {
 	db := setupTestDB(t)
-	handlers := NewSecretHandlers(db)
+	handlers := NewSecretHandlers(db, nil)
 	user, userCtx := createTestUser(t, db)
 	namespace := createTestNamespace(t, db)
 
@@ -642,7 +655,7 @@ func TestUpdateSecret(t *testing.T) {
 
 func TestDeleteSecret(t *testing.T) {
 	db := setupTestDB(t)
-	handlers := NewSecretHandlers(db)
+	handlers := NewSecretHandlers(db, nil)
 	user, userCtx := createTestUser(t, db)
 	namespace := createTestNamespace(t, db)
 
@@ -686,7 +699,107 @@ func TestDeleteSecret(t *testing.T) {
 
 		var errResp map[string]string
 		json.NewDecoder(w.Body).Decode(&errResp)
-		assert.Contains(t, errResp["error"], "Only drafts")
+		assert.Contains(t, errResp["error"], "Cannot delete published secrets from UI")
+	})
+
+	t.Run("error - delete drifted secret without gitSync", func(t *testing.T) {
+		handlers := NewSecretHandlers(db, nil) // No gitSync
+		createTestSecret(t, db, namespace.ID, "drifted-secret-delete", "drifted", &user.ID)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/namespaces/"+namespace.ID.String()+"/secrets/drifted-secret-delete", nil)
+		req = withUserContext(req, userCtx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespace.ID.String())
+		rctx.URLParams.Add("name", "drifted-secret-delete")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w := httptest.NewRecorder()
+		handlers.DeleteSecret(w, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+		var errResp map[string]string
+		json.NewDecoder(w.Body).Decode(&errResp)
+		assert.Contains(t, errResp["error"], "Git sync service is not available")
+	})
+
+	t.Run("success - reset drifted secret to Git state", func(t *testing.T) {
+		// Create a drifted secret
+		secret := createTestSecret(t, db, namespace.ID, "drifted-secret-reset", "drifted", &user.ID)
+
+		// Create mock gitSync that resets the secret to published
+		mockGitSync := &MockGitSync{
+			SyncSecretFunc: func(namespaceName, secretName string) error {
+				// Simulate resetting the secret to published state
+				assert.Equal(t, namespace.Name, namespaceName)
+				assert.Equal(t, "drifted-secret-reset", secretName)
+
+				// Update the secret to published status in DB
+				db.Model(&models.SecretDraft{}).
+					Where("id = ?", secret.ID).
+					Updates(map[string]interface{}{
+						"status":     "published",
+						"commit_sha": "abc123",
+					})
+				return nil
+			},
+		}
+
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/namespaces/"+namespace.ID.String()+"/secrets/drifted-secret-reset", nil)
+		req = withUserContext(req, userCtx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespace.ID.String())
+		rctx.URLParams.Add("name", "drifted-secret-reset")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w := httptest.NewRecorder()
+		handlers.DeleteSecret(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]string
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, "Secret reset to Git state", resp["message"])
+		assert.Equal(t, "published", resp["status"])
+
+		// Verify secret is now published
+		var updatedSecret models.SecretDraft
+		db.First(&updatedSecret, secret.ID)
+		assert.Equal(t, "published", updatedSecret.Status)
+	})
+
+	t.Run("error - reset drifted secret fails", func(t *testing.T) {
+		createTestSecret(t, db, namespace.ID, "drifted-secret-fail", "drifted", &user.ID)
+
+		// Create mock gitSync that returns an error
+		mockGitSync := &MockGitSync{
+			SyncSecretFunc: func(namespaceName, secretName string) error {
+				return fmt.Errorf("failed to read from Git")
+			},
+		}
+
+		handlers := NewSecretHandlers(db, mockGitSync)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/namespaces/"+namespace.ID.String()+"/secrets/drifted-secret-fail", nil)
+		req = withUserContext(req, userCtx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("namespace", namespace.ID.String())
+		rctx.URLParams.Add("name", "drifted-secret-fail")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		w := httptest.NewRecorder()
+		handlers.DeleteSecret(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+		var errResp map[string]string
+		json.NewDecoder(w.Body).Decode(&errResp)
+		assert.Contains(t, errResp["error"], "Failed to reset secret from Git")
 	})
 
 	t.Run("error - secret not found", func(t *testing.T) {

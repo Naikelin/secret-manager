@@ -15,6 +15,7 @@ import (
 	"github.com/yourorg/secret-manager/internal/drift"
 	"github.com/yourorg/secret-manager/internal/flux"
 	"github.com/yourorg/secret-manager/internal/git"
+	"github.com/yourorg/secret-manager/internal/gitsync"
 	"github.com/yourorg/secret-manager/internal/k8s"
 	mw "github.com/yourorg/secret-manager/internal/middleware"
 	"github.com/yourorg/secret-manager/internal/notifications"
@@ -50,7 +51,6 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 
 	// Initialize handlers
 	authHandlers := NewAuthHandlers(db, cfg)
-	secretHandlers := NewSecretHandlers(db)
 
 	// Initialize Git and SOPS clients for publish handlers
 	gitClient, err := initGitClient(cfg)
@@ -73,6 +73,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 		fmt.Printf("[INIT] SOPS client is nil\n")
 	}
 
+	// Initialize Git syncer for secret handlers
+	var gitSyncer GitSyncInterface
+	if gitClient != nil {
+		gitSyncer = initGitSyncer(db, gitClient)
+	}
+
+	secretHandlers := NewSecretHandlers(db, gitSyncer)
 	publishHandlers := NewPublishHandlers(db, gitClient, sopsClient)
 
 	// Initialize FluxCD client for sync handlers
@@ -287,4 +294,9 @@ func initK8sClient(cfg *config.Config) (*k8s.K8sClient, error) {
 	}
 
 	return k8sClient, nil
+}
+
+// initGitSyncer initializes the Git syncer for secret handlers
+func initGitSyncer(db *gorm.DB, gitClient GitClientInterface) *gitsync.Syncer {
+	return gitsync.NewSyncer(db, gitClient)
 }

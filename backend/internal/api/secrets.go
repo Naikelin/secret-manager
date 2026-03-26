@@ -25,12 +25,21 @@ var dns1123Regex = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]
 
 // SecretHandlers contains handlers for secret operations
 type SecretHandlers struct {
-	db *gorm.DB
+	db      *gorm.DB
+	gitSync GitSyncInterface
+}
+
+// GitSyncInterface defines the interface for Git sync operations
+type GitSyncInterface interface {
+	SyncSecret(namespaceName, secretName string) error
 }
 
 // NewSecretHandlers creates a new SecretHandlers instance
-func NewSecretHandlers(db *gorm.DB) *SecretHandlers {
-	return &SecretHandlers{db: db}
+func NewSecretHandlers(db *gorm.DB, gitSync GitSyncInterface) *SecretHandlers {
+	return &SecretHandlers{
+		db:      db,
+		gitSync: gitSync,
+	}
 }
 
 // CreateSecretRequest represents the request body for creating a secret
@@ -364,17 +373,20 @@ func (h *SecretHandlers) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSecret handles DELETE /api/v1/namespaces/{namespace}/secrets/{name}
 // @Summary Delete secret
-// @Description Delete a secret from the database. Note: Deleting published secrets may cause drift.
+// @Description Delete a secret following GitOps semantics: drafts are deleted, published secrets are blocked (409), drifted secrets are reset to Git state.
 // @Tags secrets
 // @Accept json
 // @Produce json
 // @Param namespace path string true "Namespace ID (UUID)"
 // @Param name path string true "Secret name"
-// @Success 204 "Secret deleted successfully"
+// @Success 204 "Secret deleted successfully (draft only)"
+// @Success 200 {object} map[string]string "Secret reset to Git state (drifted only)"
 // @Failure 400 {object} map[string]string "Invalid request"
 // @Failure 401 {object} map[string]string "Authentication required"
 // @Failure 404 {object} map[string]string "Secret not found"
+// @Failure 409 {object} map[string]string "Cannot delete published secret from UI"
 // @Failure 500 {object} map[string]string "Server error"
+// @Failure 503 {object} map[string]string "Git sync service unavailable"
 // @Security BearerAuth
 // @Router /namespaces/{namespace}/secrets/{name} [delete]
 func (h *SecretHandlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
@@ -407,8 +419,53 @@ func (h *SecretHandlers) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Allow deletion of secrets in any status
-	// Note: Deleting a published secret will cause drift until unpublished from Git
+	// Handle different statuses according to GitOps semantics
+	switch secret.Status {
+	case "draft":
+		// Allow deletion - draft only exists in DB
+		// Continue with existing delete logic
+
+	case "published":
+		// Block deletion - secret exists in Git, cannot delete from UI
+		respondError(w, http.StatusConflict,
+			"Cannot delete published secrets from UI. Delete from Git repository or use unpublish endpoint.")
+		return
+
+	case "drifted":
+		// Reset to Git state - discard local changes, re-sync from Git
+		if h.gitSync == nil {
+			respondError(w, http.StatusServiceUnavailable,
+				"Git sync service is not available. Cannot reset drifted secret.")
+			return
+		}
+
+		// Fetch the namespace to get its name
+		var namespace models.Namespace
+		if err := h.db.First(&namespace, namespaceID).Error; err != nil {
+			respondError(w, http.StatusInternalServerError, "Failed to fetch namespace")
+			return
+		}
+
+		// Reset the secret to Git state
+		if err := h.gitSync.SyncSecret(namespace.Name, secretName); err != nil {
+			logger.Error("Failed to reset drifted secret", "error", err, "namespace", namespace.Name, "secret", secretName)
+			respondError(w, http.StatusInternalServerError,
+				fmt.Sprintf("Failed to reset secret from Git: %v", err))
+			return
+		}
+
+		// Log the reset action
+		logger.Info("Reset drifted secret to Git state",
+			"namespace", namespace.Name,
+			"secret", secretName,
+			"user", userCtx.Email)
+
+		respondJSON(w, http.StatusOK, map[string]string{
+			"message": "Secret reset to Git state",
+			"status":  "published",
+		})
+		return
+	}
 
 	// Create audit log before deletion
 	auditDetails := map[string]interface{}{

@@ -17,6 +17,7 @@ function SecretsContent() {
   const [error, setError] = useState('');
   const [publishDialog, setPublishDialog] = useState<{ secret: Secret } | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<{ secret: Secret } | null>(null);
+  const [unpublishDialog, setUnpublishDialog] = useState<{ secret: Secret } | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
@@ -109,6 +110,24 @@ function SecretsContent() {
     }
   }
 
+  async function handleUnpublish(secret: Secret) {
+    setUnpublishDialog({ secret });
+  }
+
+  async function confirmUnpublish() {
+    if (!unpublishDialog) return;
+    const secret = unpublishDialog.secret;
+    setUnpublishDialog(null);
+    
+    try {
+      await api.unpublishSecret(selectedNs, secret.secret_name);
+      setSuccessMessage('Secret unpublished and reverted to draft');
+      loadSecrets(selectedNs);
+    } catch (err: any) {
+      setError('Failed to unpublish secret: ' + (err.message || 'Unknown error'));
+    }
+  }
+
   async function handleDelete(secret: Secret) {
     if (secret.status === 'published') {
       return; // Should not reach here due to disabled button
@@ -118,17 +137,22 @@ function SecretsContent() {
 
   async function confirmDelete() {
     if (!deleteDialog) return;
-    
     const secret = deleteDialog.secret;
     setDeleteDialog(null);
     
     try {
-      await api.deleteSecret(selectedNs, secret.secret_name);
-      setSuccessMessage('Secret deleted');
-      setTimeout(() => setSuccessMessage(''), 5000); // Increased to 5 seconds
+      const response = await api.deleteSecret(selectedNs, secret.secret_name);
+      
+      // Handle drifted secret reset (returns 200 with message)
+      if (response && typeof response === 'object' && 'message' in response) {
+        setSuccessMessage(response.message || 'Secret reset to Git state');
+      } else {
+        setSuccessMessage('Secret deleted');
+      }
+      
       loadSecrets(selectedNs);
     } catch (err: any) {
-      setError('Failed to delete secret: ' + (err.response?.data?.error || err.message));
+      setError('Failed to delete secret: ' + (err.message || 'Unknown error'));
     }
   }
 
@@ -297,41 +321,60 @@ function SecretsContent() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
+                          {/* Edit button - always available */}
                           <button
                             onClick={() => router.push(`/secrets/edit/${secret.secret_name}?namespace=${selectedNs}`)}
-                            className="text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors duration-150"
-                            title={secret.status !== 'draft' ? 'Editing will create a new draft version' : 'Edit secret'}
+                            className="text-blue-600 hover:text-blue-800 font-medium hover:underline"
                           >
                             Edit
-                            {secret.status !== 'draft' && (
-                              <span className="ml-1 text-xs">✏️</span>
-                            )}
                           </button>
+                          
+                          {/* Publish/Unpublish/Resolve Drift */}
                           {secret.status === 'drifted' ? (
                             <a
                               href={`/drift?secret=${secret.secret_name}&namespace=${selectedNs}`}
-                              className="text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors duration-150 flex items-center gap-1"
-                              title="Resolve drift before publishing"
+                              className="text-yellow-600 hover:text-yellow-800 font-medium hover:underline flex items-center gap-1"
                             >
                               ⚠️ Resolve Drift
                             </a>
-                          ) : (secret.status === 'draft' || secret.status === 'published') && (
+                          ) : secret.status === 'published' ? (
+                            <button
+                              onClick={() => handleUnpublish(secret)}
+                              className="text-orange-600 hover:text-orange-800 font-medium hover:underline"
+                              title="Remove from Git and revert to draft"
+                            >
+                              Unpublish
+                            </button>
+                          ) : (
                             <button
                               onClick={() => handlePublish(secret)}
-                              className="text-green-600 hover:text-green-800 font-medium hover:underline transition-colors duration-150"
-                              title={secret.status === 'draft' ? 'Publish to Git' : 'Re-publish changes to Git'}
+                              className="text-green-600 hover:text-green-800 font-medium hover:underline"
                             >
-                              {secret.status === 'draft' ? 'Publish' : 'Re-Publish'}
+                              Publish
                             </button>
                           )}
-                          <button
-                            onClick={() => handleDelete(secret)}
-                            disabled={secret.status === 'published'}
-                            className="text-red-600 hover:text-red-800 font-medium hover:underline transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title={secret.status === 'published' ? 'Cannot delete published secrets' : 'Delete secret'}
-                          >
-                            Delete
-                          </button>
+                          
+                          {/* Delete/Reset button */}
+                          {secret.status === 'drifted' ? (
+                            <button
+                              onClick={() => handleDelete(secret)}
+                              className="text-orange-600 hover:text-orange-800 font-medium hover:underline"
+                              title="Discard local changes and sync from Git"
+                            >
+                              🔄 Reset to Git
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleDelete(secret)}
+                              disabled={secret.status === 'published'}
+                              className="text-red-600 hover:text-red-800 font-medium hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={secret.status === 'published' 
+                                ? 'Cannot delete published secrets. Use Unpublish to remove from Git.' 
+                                : 'Delete secret'}
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -367,12 +410,27 @@ function SecretsContent() {
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         isOpen={!!deleteDialog}
-        title="Delete Secret"
-        message={`Are you sure you want to delete "${deleteDialog?.secret.secret_name}"? This action cannot be undone.`}
-        confirmLabel="Confirm Delete"
+        title={deleteDialog?.secret.status === 'drifted' ? 'Reset Secret to Git' : 'Delete Secret'}
+        message={
+          deleteDialog?.secret.status === 'drifted'
+            ? `Reset "${deleteDialog.secret.secret_name}" to the version in Git? This will discard any local drift.`
+            : `Are you sure you want to delete "${deleteDialog?.secret.secret_name}"? This action cannot be undone.`
+        }
+        confirmLabel={deleteDialog?.secret.status === 'drifted' ? 'Confirm Reset' : 'Confirm Delete'}
         confirmVariant="danger"
         onConfirm={confirmDelete}
         onCancel={() => setDeleteDialog(null)}
+      />
+
+      {/* Unpublish Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!unpublishDialog}
+        title="Unpublish Secret"
+        message={`Are you sure you want to unpublish "${unpublishDialog?.secret.secret_name}"? This will remove the secret from Git and revert it to draft status.`}
+        confirmLabel="Confirm Unpublish"
+        confirmVariant="primary"
+        onConfirm={confirmUnpublish}
+        onCancel={() => setUnpublishDialog(null)}
       />
     </div>
   );

@@ -246,8 +246,8 @@ export const api = {
     });
   },
 
-  async deleteSecret(namespaceId: string, name: string): Promise<void> {
-    return apiRequest<void>(`/api/v1/namespaces/${namespaceId}/secrets/${name}`, {
+  async deleteSecret(namespaceId: string, name: string): Promise<void | { message: string; status: string }> {
+    return apiRequest(`/api/v1/namespaces/${namespaceId}/secrets/${name}`, {
       method: 'DELETE',
     });
   },
@@ -256,6 +256,13 @@ export const api = {
     return apiRequest<Secret>(`/api/v1/namespaces/${namespaceId}/secrets/${name}/publish`, {
       method: 'POST',
     });
+  },
+
+  async unpublishSecret(namespaceId: string, name: string): Promise<Secret> {
+    return apiRequest<Secret>(
+      `/api/v1/namespaces/${namespaceId}/secrets/${name}/unpublish`,
+      { method: 'POST' }
+    );
   },
 
   // Drift Detection

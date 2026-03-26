@@ -20,6 +20,7 @@ type GitClient interface {
 	EnsureRepo() error
 	RepoPath() string
 	GetCurrentSHA() (string, error)
+	ReadFile(path string) ([]byte, error)
 }
 
 // Syncer synchronizes secrets from Git repository to database
@@ -239,6 +240,107 @@ func (s *Syncer) syncSecret(namespace models.Namespace, secretName, filePath, gi
 			"namespace", namespace.Name,
 			"secret", secretName,
 		)
+	}
+
+	return nil
+}
+
+// SyncSecret reloads a specific secret from Git, discarding any local changes
+func (s *Syncer) SyncSecret(namespaceName, secretName string) error {
+	logger.Info("[GitSync] Syncing single secret from Git", "namespace", namespaceName, "secret", secretName)
+
+	// 1. Ensure Git repo is up to date
+	if err := s.gitClient.EnsureRepo(); err != nil {
+		return fmt.Errorf("failed to sync Git repository: %w", err)
+	}
+
+	// 2. Get current Git SHA
+	sha, err := s.gitClient.GetCurrentSHA()
+	if err != nil {
+		return fmt.Errorf("failed to get Git SHA: %w", err)
+	}
+
+	// 3. Find namespace ID
+	var namespace models.Namespace
+	if err := s.db.Where("name = ?", namespaceName).First(&namespace).Error; err != nil {
+		return fmt.Errorf("namespace not found: %w", err)
+	}
+
+	// 4. Read secret file from Git
+	secretPath := fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespaceName, secretName)
+	content, err := s.gitClient.ReadFile(secretPath)
+	if err != nil {
+		return fmt.Errorf("secret not found in Git: %w", err)
+	}
+
+	// 5. Parse YAML (reuse logic from syncSecret)
+	var secretData map[string]interface{}
+	if err := yaml.Unmarshal(content, &secretData); err != nil {
+		return fmt.Errorf("failed to parse secret YAML: %w", err)
+	}
+
+	// Extract the actual secret data (skip metadata fields)
+	cleanData := make(map[string]interface{})
+	for key, value := range secretData {
+		// Skip Kubernetes metadata fields
+		if key == "apiVersion" || key == "kind" || key == "metadata" || key == "type" {
+			continue
+		}
+		// The actual data is usually in a "data" or "stringData" field
+		if key == "data" || key == "stringData" {
+			if dataMap, ok := value.(map[string]interface{}); ok {
+				cleanData = dataMap
+			}
+		}
+	}
+
+	// If we didn't find data/stringData, use the whole structure
+	if len(cleanData) == 0 {
+		cleanData = secretData
+	}
+
+	// Convert to JSON for database storage
+	jsonData, err := json.Marshal(cleanData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal data to JSON: %w", err)
+	}
+
+	// 6. Update or create DB record with status="published"
+	now := time.Now()
+	secret := models.SecretDraft{
+		SecretName:  secretName,
+		NamespaceID: namespace.ID,
+		Data:        datatypes.JSON(jsonData),
+		Status:      "published",
+		GitBaseSHA:  sha,
+		CommitSHA:   sha,
+		EditedAt:    now,
+		PublishedAt: &now,
+		UpdatedAt:   now,
+	}
+
+	// Use GORM's Save which updates if exists, creates if not
+	// First, check if it exists to properly update all fields
+	var existingDraft models.SecretDraft
+	result := s.db.Where("secret_name = ? AND namespace_id = ?", secretName, namespace.ID).First(&existingDraft)
+
+	if result.Error == gorm.ErrRecordNotFound {
+		// Create new record
+		secret.CreatedAt = now
+		if err := s.db.Create(&secret).Error; err != nil {
+			return fmt.Errorf("failed to create secret: %w", err)
+		}
+		logger.Info("[GitSync] Created secret from Git", "namespace", namespaceName, "secret", secretName)
+	} else if result.Error != nil {
+		return fmt.Errorf("failed to query existing secret: %w", result.Error)
+	} else {
+		// Update existing record - preserve ID and CreatedAt
+		secret.ID = existingDraft.ID
+		secret.CreatedAt = existingDraft.CreatedAt
+		if err := s.db.Save(&secret).Error; err != nil {
+			return fmt.Errorf("failed to update secret: %w", err)
+		}
+		logger.Info("[GitSync] Reset secret to Git state", "namespace", namespaceName, "secret", secretName, "sha", sha[:7])
 	}
 
 	return nil
