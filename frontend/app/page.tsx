@@ -8,9 +8,11 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    // Redirect authenticated users to dashboard
+    // Redirect authenticated users to dashboard, unauthenticated to login
     if (isAuthenticated()) {
       router.push('/dashboard');
+    } else {
+      router.push('/auth/login');
     }
   }, [router]);
 

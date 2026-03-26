@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type Namespace, type DriftEvent } from '@/lib/api';
-import { DriftComparison } from '@/components/DriftComparison';
+import { DriftComparison } from '@/components/drift/DriftComparison';
 
 export default function DriftPage() {
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
@@ -318,7 +318,11 @@ export default function DriftPage() {
                             <span>🔍</span>
                             Visual Comparison
                           </h4>
-                          <DriftComparison driftEventId={event.id} />
+                          <DriftComparison 
+                            driftEventId={event.id}
+                            secretName={event.secret_name}
+                            namespace={selectedNs}
+                          />
                         </div>
                       </div>
                     )}
