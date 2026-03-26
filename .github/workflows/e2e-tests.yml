@@ -99,7 +99,7 @@ jobs:
       - name: Build backend
         run: |
           cd backend
-          go build -o bin/server ./cmd/server
+          go build -buildvcs=false -o bin/server ./cmd/server
 
       - name: Start backend server
         run: |
