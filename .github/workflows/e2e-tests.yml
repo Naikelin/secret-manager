@@ -37,7 +37,6 @@ jobs:
       DATABASE_URL: postgres://dev:devpass@postgres:5432/secretmanager?sslmode=disable
       FRONTEND_URL: http://localhost:3000
       BACKEND_URL: http://localhost:8080
-      PORT: 8080
       LOG_LEVEL: info
       JWT_SECRET: test-secret-for-ci
       AUTH_PROVIDER: mock
@@ -97,11 +96,15 @@ jobs:
           done
 
       - name: Build backend
+        env:
+          PORT: 8080
         run: |
           cd backend
           go build -buildvcs=false -o bin/server ./cmd/server
 
       - name: Start backend server
+        env:
+          PORT: 8080
         run: |
           cd backend
           ./bin/server > /tmp/backend.log 2>&1 &
