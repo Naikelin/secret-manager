@@ -184,7 +184,7 @@ data:
 	}
 
 	// Create drift detector
-	detector := drift.NewDriftDetector(db, mockK8sClient, mockGitClient, mockSOPSClient)
+	detector := drift.NewDriftDetector(db, mockK8sClient, mockGitClient, mockSOPSClient, nil)
 	handlers := NewDriftHandlers(db, detector)
 
 	// Create request
@@ -215,7 +215,7 @@ func TestTriggerDriftCheck_NamespaceNotFound(t *testing.T) {
 	db := setupDriftTestDB(t)
 
 	// Create dummy drift detector
-	detector := drift.NewDriftDetector(db, nil, nil, nil)
+	detector := drift.NewDriftDetector(db, nil, nil, nil, nil)
 	handlers := NewDriftHandlers(db, detector)
 
 	// Create request with non-existent namespace
@@ -238,7 +238,7 @@ func TestTriggerDriftCheck_InvalidNamespaceID(t *testing.T) {
 	db := setupDriftTestDB(t)
 
 	// Create dummy drift detector
-	detector := drift.NewDriftDetector(db, nil, nil, nil)
+	detector := drift.NewDriftDetector(db, nil, nil, nil, nil)
 	handlers := NewDriftHandlers(db, detector)
 
 	// Create request with invalid UUID

@@ -88,7 +88,7 @@ data:
 	}
 
 	// Create detector and sync
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.SyncFromGit(ctx, driftEvent.ID)
 	require.NoError(t, err)
 
@@ -99,7 +99,8 @@ data:
 	var updatedDrift models.DriftEvent
 	require.NoError(t, db.First(&updatedDrift, driftEvent.ID).Error)
 	assert.NotNil(t, updatedDrift.ResolvedAt)
-	assert.Equal(t, "sync_from_git", updatedDrift.ResolutionAction)
+	assert.NotNil(t, updatedDrift.ResolutionAction)
+	assert.Equal(t, "sync_from_git", *updatedDrift.ResolutionAction)
 
 	// Verify secret status updated to published
 	var updatedSecret models.SecretDraft
@@ -151,7 +152,7 @@ func TestSyncFromGit_GitFileNotFound(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and attempt sync
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.SyncFromGit(ctx, driftEvent.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read secret from Git")
@@ -173,13 +174,14 @@ func TestSyncFromGit_AlreadyResolved(t *testing.T) {
 
 	// Create drift event that's already resolved
 	now := time.Now()
+	resolutionAction := "ignore"
 	driftEvent := models.DriftEvent{
 		ID:               uuid.New(),
 		SecretName:       "db-creds",
 		NamespaceID:      namespace.ID,
 		DetectedAt:       time.Now(),
 		ResolvedAt:       &now,
-		ResolutionAction: "ignore",
+		ResolutionAction: &resolutionAction,
 		GitVersion:       datatypes.JSON([]byte(`{}`)),
 		K8sVersion:       datatypes.JSON([]byte(`{}`)),
 		Diff:             datatypes.JSON([]byte(`{}`)),
@@ -191,7 +193,7 @@ func TestSyncFromGit_AlreadyResolved(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and attempt sync
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.SyncFromGit(ctx, driftEvent.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already resolved")
@@ -279,7 +281,7 @@ func TestImportToGit_Success(t *testing.T) {
 	}
 
 	// Create detector and import
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.ImportToGit(ctx, driftEvent.ID)
 	require.NoError(t, err)
 
@@ -292,7 +294,8 @@ func TestImportToGit_Success(t *testing.T) {
 	var updatedDrift models.DriftEvent
 	require.NoError(t, db.First(&updatedDrift, driftEvent.ID).Error)
 	assert.NotNil(t, updatedDrift.ResolvedAt)
-	assert.Equal(t, "import_to_git", updatedDrift.ResolutionAction)
+	assert.NotNil(t, updatedDrift.ResolutionAction)
+	assert.Equal(t, "import_to_git", *updatedDrift.ResolutionAction)
 
 	// Verify secret status updated to published
 	var updatedSecret models.SecretDraft
@@ -344,7 +347,7 @@ func TestImportToGit_K8sSecretNotFound(t *testing.T) {
 	sopsClient := &MockSOPSClient{}
 
 	// Create detector and attempt import
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.ImportToGit(ctx, driftEvent.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get secret from Kubernetes")
@@ -399,7 +402,7 @@ func TestMarkResolved_Success(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and mark resolved
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.MarkResolved(ctx, driftEvent.ID, user.ID)
 	require.NoError(t, err)
 
@@ -409,7 +412,8 @@ func TestMarkResolved_Success(t *testing.T) {
 	assert.NotNil(t, updatedDrift.ResolvedAt)
 	assert.NotNil(t, updatedDrift.ResolvedBy)
 	assert.Equal(t, user.ID, *updatedDrift.ResolvedBy)
-	assert.Equal(t, "ignore", updatedDrift.ResolutionAction)
+	assert.NotNil(t, updatedDrift.ResolutionAction)
+	assert.Equal(t, "ignore", *updatedDrift.ResolutionAction)
 
 	// Verify secret status updated to published
 	var updatedSecret models.SecretDraft
@@ -435,7 +439,7 @@ func TestMarkResolved_DriftNotFound(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create detector and attempt to mark non-existent drift
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 	err := detector.MarkResolved(ctx, uuid.New(), uuid.New())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load drift event")

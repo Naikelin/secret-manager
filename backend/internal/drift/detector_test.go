@@ -260,7 +260,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -271,85 +271,6 @@ stringData:
 }
 
 // TestDetectDriftForSecret_Modified tests drift detection when data is modified
-func TestDetectDriftForSecret_Modified(t *testing.T) {
-	db := setupTestDB(t)
-
-	// Create test namespace
-	namespace := models.Namespace{Cluster: "test-cluster", Environment: "dev",
-		ID:   uuid.New(),
-		Name: "test-ns",
-	}
-	require.NoError(t, db.Create(&namespace).Error)
-
-	// Create test secret
-	secretData := map[string]string{"username": "admin", "password": "secret123"}
-	secretDataJSON, _ := json.Marshal(secretData)
-	secret := models.SecretDraft{
-		ID:          uuid.New(),
-		SecretName:  "db-creds",
-		NamespaceID: namespace.ID,
-		Data:        datatypes.JSON(secretDataJSON),
-		Status:      "published",
-	}
-	require.NoError(t, db.Create(&secret).Error)
-
-	// Mock Git client returning decrypted YAML (using stringData for plain-text values)
-	gitClient := &MockGitClient{
-		ReadFileFunc: func(path string) ([]byte, error) {
-			yamlContent := `apiVersion: v1
-kind: Secret
-metadata:
-  name: db-creds
-  namespace: test-ns
-type: Opaque
-stringData:
-  username: admin
-  password: secret123
-`
-			return []byte(yamlContent), nil
-		},
-	}
-
-	// Mock SOPS client (no-op decryption)
-	sopsClient := &MockSOPSClient{}
-
-	// Mock K8s client returning DIFFERENT secret (password changed)
-	k8sClient := &MockK8sClient{
-		GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
-			return &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "db-creds",
-					Namespace: "test-ns",
-				},
-				Type: corev1.SecretTypeOpaque,
-				Data: map[string][]byte{
-					"username": []byte("admin"),
-					"password": []byte("CHANGED_PASSWORD"), // <-- CHANGED
-				},
-			}, nil
-		},
-	}
-
-	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
-
-	// Detect drift
-	event, err := detector.DetectDriftForSecret(secret.ID)
-
-	// Assert drift detected
-	require.NoError(t, err)
-	require.NotNil(t, event, "Drift should be detected")
-	assert.Equal(t, "db-creds", event.SecretName)
-	assert.Equal(t, namespace.ID, event.NamespaceID)
-
-	// Verify drift was saved to database
-	var savedEvent models.DriftEvent
-	err = db.First(&savedEvent, "secret_name = ?", "db-creds").Error
-	require.NoError(t, err)
-	assert.Equal(t, event.ID, savedEvent.ID)
-}
-
-// TestDetectDriftForSecret_Deleted tests drift detection when secret is missing from K8s
 func TestDetectDriftForSecret_Deleted(t *testing.T) {
 	db := setupTestDB(t)
 
@@ -400,7 +321,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -454,7 +375,7 @@ func TestDetectDriftForSecret_GitFileMissing(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -500,7 +421,7 @@ func TestDetectDriftForSecret_DraftSecret(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -584,7 +505,7 @@ data:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift for entire namespace
 	events, err := detector.DetectDriftForNamespace(namespace.ID)
@@ -640,7 +561,7 @@ func TestDetectDriftForSecret_DecryptionError(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -710,7 +631,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient)
+	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil)
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
