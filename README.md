@@ -26,7 +26,7 @@ GitOps-based Kubernetes Secret Management with SOPS encryption and FluxCD auto-s
 
 1. **Clone the repository**
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/Naikelin/secret-manager.git
    cd secret-manager
    ```
 
