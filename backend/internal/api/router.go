@@ -194,9 +194,12 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 			}
 
 			r.Route("/drift-events/{drift_id}", func(r chi.Router) {
-				r.With(mw.RequireAdmin(db, getNamespaceFromDrift)).Post("/sync-from-git", driftResolutionHandlers.SyncFromGit)
-				r.With(mw.RequireAdmin(db, getNamespaceFromDrift)).Post("/import-to-git", driftResolutionHandlers.ImportToGit)
-				r.With(mw.RequireAdmin(db, getNamespaceFromDrift)).Post("/mark-resolved", driftResolutionHandlers.MarkResolved)
+				// Sync from Git: overwrites K8s with Git version (write permission)
+				r.With(mw.RequireWrite(db, getNamespaceFromDrift)).Post("/sync-from-git", driftResolutionHandlers.SyncFromGit)
+				// Import to Git: commits K8s version to Git (publish permission, same as regular publish)
+				r.With(mw.RequirePublish(db, getNamespaceFromDrift)).Post("/import-to-git", driftResolutionHandlers.ImportToGit)
+				// Mark Resolved: only updates DB status (write permission)
+				r.With(mw.RequireWrite(db, getNamespaceFromDrift)).Post("/mark-resolved", driftResolutionHandlers.MarkResolved)
 			})
 
 			// Audit logs - require authentication (all users can view their own actions)
