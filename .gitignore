@@ -11,6 +11,11 @@
 /frontend/.env.local
 /frontend/.env
 
+# Playwright
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/playwright/.cache/
+
 # Development data
 dev-data/*
 !dev-data/.gitkeep
