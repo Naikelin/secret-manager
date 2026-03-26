@@ -58,11 +58,7 @@ export default function DriftPage() {
     try {
       setChecking(true);
       setError('');
-      // Ensure loading state is visible for at least a brief moment
-      const [_] = await Promise.all([
-        api.triggerDriftCheck(selectedNs),
-        new Promise(resolve => setTimeout(resolve, 300))
-      ]);
+      await api.triggerDriftCheck(selectedNs);
       await loadDriftEvents(selectedNs);
     } catch (err) {
       setError('Failed to trigger drift check');
@@ -151,7 +147,7 @@ export default function DriftPage() {
     }
   }
 
-  // Only show loading screen on initial mount before any data loads
+  // Only show loading screen on initial mount before any data loads (and no error)
   if (loading && namespaces.length === 0 && !error) return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-yellow-50 p-8">
       <div className="max-w-6xl mx-auto">
@@ -165,6 +161,7 @@ export default function DriftPage() {
     </div>
   );
 
+  // If we have an error during initial load, still show main content with error banner
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-yellow-50 p-8">
       <div className="max-w-6xl mx-auto">
@@ -190,7 +187,7 @@ export default function DriftPage() {
         </div>
 
         {error && (
-          <div className="mb-6 bg-red-50 border-l-4 border-red-500 rounded-lg p-4 shadow-sm">
+          <div className="mb-6 bg-red-50 border-l-4 border-red-500 rounded-lg p-4 shadow-sm" data-testid="error-banner">
             <div className="flex items-center gap-2">
               <span className="text-red-600 font-medium">❌ Error:</span>
               <p className="text-red-700">{error}</p>
