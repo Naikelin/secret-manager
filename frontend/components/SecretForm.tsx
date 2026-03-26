@@ -26,11 +26,11 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
   }, []);
 
   useEffect(() => {
-    // Auto-select first namespace if none selected and namespaces loaded
-    if (!selectedNamespace && namespaces.length > 0) {
-      setSelectedNamespace(namespaces[0].id);
+    // Auto-select namespace ONLY if namespaceId prop was provided (from URL or edit mode)
+    if (namespaceId && !selectedNamespace && namespaces.length > 0) {
+      setSelectedNamespace(namespaceId);
     }
-  }, [namespaces, selectedNamespace]);
+  }, [namespaces, selectedNamespace, namespaceId]);
 
   async function loadNamespaces() {
     try {
@@ -136,7 +136,7 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
           disabled={mode === 'edit'}
           className="w-full px-3 py-2 border rounded disabled:bg-gray-100"
         >
-          {!selectedNamespace && <option value="">Select namespace...</option>}
+          <option value="">Select namespace...</option>
           {namespaces.map((ns) => (
             <option key={ns.id} value={ns.id}>
               {ns.name} ({ns.cluster})

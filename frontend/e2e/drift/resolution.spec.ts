@@ -28,8 +28,10 @@ test.describe('Drift Resolution Actions', () => {
   });
 
   test('should not show resolution buttons for resolved drift', async ({ page }) => {
-    // Find resolved drift event (if any)
-    const resolvedCard = page.locator('.bg-white.rounded-xl').filter({ hasText: /resolved/i }).first();
+    // Find resolved drift event - look for the green "✓ Resolved" badge specifically
+    const resolvedCard = page.locator('.bg-white.rounded-xl').filter({ 
+      has: page.locator('span.bg-green-100.text-green-800', { hasText: /✓\s*resolved/i }) 
+    }).first();
     
     if (await resolvedCard.count() > 0) {
       // Should NOT have resolution buttons

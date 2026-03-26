@@ -9,9 +9,10 @@ authenticatedTest.describe('Create Secret', () => {
     await page.getByRole('button', { name: 'Create Secret' }).first().click();
     
     // Fill form
-    await page.getByLabel('Secret Name').fill(`e2e-test-${Date.now()}`);
-    // Select by visible label (namespace displays as "name (cluster)")
-    await page.getByLabel('Namespace').selectOption({ label: /development/ });
+    const secretName = `e2e-test-${Date.now()}`;
+    await page.getByLabel('Secret Name').fill(secretName);
+    // Select by UUID value (development namespace)
+    await page.getByLabel('Namespace').selectOption('10000000-0000-0000-0000-000000000001');
     await page.getByLabel('Key').fill('username');
     await page.getByLabel('Value').fill('testuser');
     await page.getByRole('button', { name: 'Add Key' }).click();
@@ -19,14 +20,19 @@ authenticatedTest.describe('Create Secret', () => {
     // Submit
     await page.getByRole('button', { name: 'Create Draft' }).click();
     
-    // Verify success
-    await expect(page.getByText('Secret draft created')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('draft')).toBeVisible();
+    // Verify success message
+    await expect(page.getByTestId('success-message')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('success-message')).toHaveText('Secret draft created');
+    
+    // Verify the new secret appears with draft status
+    const secretRow = page.getByRole('row').filter({ hasText: secretName });
+    await expect(secretRow).toBeVisible();
+    await expect(secretRow.getByText('draft')).toBeVisible();
   });
 
   authenticatedTest('should validate required fields', async ({ page, session }) => {
-    await page.goto('/secrets');
-    await page.getByRole('button', { name: 'Create Secret' }).first().click();
+    // Navigate directly to the form without a namespace parameter
+    await page.goto('/secrets/new');
     
     // Try to submit without filling required fields
     await page.getByRole('button', { name: 'Create Draft' }).click();
@@ -42,7 +48,7 @@ authenticatedTest.describe('Create Secret', () => {
     
     // Fill name and namespace only
     await page.getByLabel('Secret Name').fill('test-no-keys');
-    await page.getByLabel('Namespace').selectOption({ label: /development/ });
+    await page.getByLabel('Namespace').selectOption('10000000-0000-0000-0000-000000000001');
     await page.getByRole('button', { name: 'Create Draft' }).click();
     
     // Verify error

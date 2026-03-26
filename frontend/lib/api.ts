@@ -65,6 +65,11 @@ export async function apiRequest<T>(
       throw new Error(error.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
+    // Handle 204 No Content (no response body)
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     return response.json();
   } catch (err) {
     // Log network errors

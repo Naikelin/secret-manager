@@ -19,8 +19,8 @@ authenticatedTest.describe('Secrets List Page', () => {
   authenticatedTest('should filter secrets by namespace', async ({ page, session }) => {
     await page.goto('/secrets');
     
-    // Select namespace filter
-    await page.getByLabel('Namespace').selectOption('development');
+    // Select namespace filter (using UUID)
+    await page.getByLabel('Namespace').selectOption('10000000-0000-0000-0000-000000000001');
     
     // Verify filtered results
     const namespaceCell = page.getByRole('cell', { name: 'development' });

@@ -9,19 +9,26 @@ authenticatedTest.describe('Delete Secret', () => {
     await page.getByRole('button', { name: 'Create Secret' }).first().click();
     const secretName = `e2e-delete-${Date.now()}`;
     await page.getByLabel('Secret Name').fill(secretName);
-    await page.getByLabel('Namespace').selectOption('development');
+    await page.getByLabel('Namespace').selectOption('10000000-0000-0000-0000-000000000001');
     await page.getByLabel('Key').fill('test');
     await page.getByLabel('Value').fill('value');
     await page.getByRole('button', { name: 'Add Key' }).click();
     await page.getByRole('button', { name: 'Create Draft' }).click();
+    
+    // Wait for create success message to appear and then disappear
+    await expect(page.getByTestId('success-message')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('success-message')).not.toBeVisible({ timeout: 6000 });
     
     // Now delete it
     const secretRow = page.getByRole('row').filter({ hasText: secretName });
     await secretRow.getByRole('button', { name: 'Delete' }).click();
     await page.getByRole('button', { name: 'Confirm Delete' }).click();
     
-    // Verify deletion
-    await expect(page.getByText('Secret deleted')).toBeVisible();
+    // Verify deletion success message
+    await expect(page.getByTestId('success-message')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('success-message')).toHaveText('Secret deleted');
+    
+    // Verify secret is removed from list
     await expect(secretRow).not.toBeVisible();
   });
 

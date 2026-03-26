@@ -27,8 +27,11 @@ authenticatedTest.describe('Edit and Publish Secret', () => {
     // Confirm publish dialog
     await page.getByRole('button', { name: 'Confirm Publish' }).click();
     
-    // Verify success
-    await expect(page.getByText('Secret published')).toBeVisible();
+    // Verify success message appears
+    await expect(page.getByTestId('success-message')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('success-message')).toHaveText('Secret published');
+    
+    // Verify status changes to published
     await expect(page.getByText('published')).toBeVisible();
   });
 
