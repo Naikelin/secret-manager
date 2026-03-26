@@ -163,6 +163,8 @@ jobs:
           npm run test:e2e
         env:
           CI: true
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://localhost:8080
 
       - name: Upload test report (on failure)
         if: failure()
