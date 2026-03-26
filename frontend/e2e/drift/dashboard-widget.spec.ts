@@ -1,15 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { authenticatedTest as test } from '../fixtures/auth';
+import { expect } from '@playwright/test';
 
 test.describe('Drift Dashboard Integration', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('auth_token', 'mock-token');
-      localStorage.setItem('user', JSON.stringify({
-        email: 'admin@example.com',
-        name: 'Admin'
-      }));
-    });
-  });
+  // Auth is automatically set up by authenticatedTest fixture
 
   test('should display drift widget on dashboard', async ({ page }) => {
     await page.goto('/dashboard');

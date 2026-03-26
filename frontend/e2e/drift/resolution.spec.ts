@@ -1,14 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { authenticatedTest as test } from '../fixtures/auth';
+import { expect } from '@playwright/test';
 
 test.describe('Drift Resolution Actions', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('auth_token', 'mock-token');
-      localStorage.setItem('user', JSON.stringify({
-        email: 'admin@example.com',
-        name: 'Admin'
-      }));
-    });
     await page.goto('/drift');
     
     // Wait for page to load
