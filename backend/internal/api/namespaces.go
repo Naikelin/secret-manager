@@ -42,7 +42,7 @@ func (h *NamespaceHandlers) ListNamespaces(w http.ResponseWriter, r *http.Reques
 
 	log.Printf("[NamespaceHandler] User from context: %s (%s)", user.Email, user.UserID)
 
-	var namespaces []models.Namespace
+	namespaces := []models.Namespace{}
 
 	// Get all namespaces the user has access to via their groups
 	err = h.db.Raw(`
