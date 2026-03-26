@@ -1,12 +1,11 @@
-name: E2E Tests
+name: E2E Tests (Local Environment)
 
 on:
-  push:
-    branches:
-      - main
+  # Only run on PRs to main (tests local environment, not actual dev/stg/prod)
   pull_request:
     branches:
       - main
+  # Allow manual trigger
   workflow_dispatch:
 
 jobs:
