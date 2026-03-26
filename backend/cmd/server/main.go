@@ -16,6 +16,7 @@ import (
 	"github.com/yourorg/secret-manager/internal/database"
 	"github.com/yourorg/secret-manager/internal/drift"
 	"github.com/yourorg/secret-manager/internal/git"
+	"github.com/yourorg/secret-manager/internal/gitsync"
 	"github.com/yourorg/secret-manager/internal/k8s"
 	"github.com/yourorg/secret-manager/internal/models"
 	"github.com/yourorg/secret-manager/internal/notifications"
@@ -91,6 +92,17 @@ func main() {
 	// Initialize drift detector for background job
 	var driftDetector *drift.DriftDetector
 	k8sClient, gitClient, sopsClient := initClientsForDrift(cfg)
+
+	// Sync secrets from Git to DB on startup
+	if gitClient != nil {
+		syncer := gitsync.NewSyncer(db, gitClient)
+		if err := syncer.SyncAll(); err != nil {
+			logger.Error("Failed to sync secrets from Git to DB", "error", err)
+		} else {
+			logger.Info("Successfully synced secrets from Git to DB")
+		}
+	}
+
 	if k8sClient != nil && gitClient != nil && sopsClient != nil {
 		// Initialize webhook client
 		webhookURL := os.Getenv("DRIFT_WEBHOOK_URL")

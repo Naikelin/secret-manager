@@ -13,22 +13,29 @@ import (
 // EnsureRepo ensures the repository exists locally
 // Clones if it doesn't exist, pulls if it does
 func (c *GitClient) EnsureRepo() error {
-	// Check if repo directory exists
-	_, err := os.Stat(c.repoPath)
+	// Check if .git directory exists inside repo path
+	gitDir := filepath.Join(c.repoPath, ".git")
+	_, err := os.Stat(gitDir)
 	if os.IsNotExist(err) {
-		// Repository doesn't exist - clone it
+		// .git doesn't exist - need to clone
 		logger.Info("Repository not found locally, cloning", "path", c.repoPath)
 		return c.Clone()
 	}
 	if err != nil {
-		return fmt.Errorf("failed to check repository path: %w", err)
+		return fmt.Errorf("failed to check .git directory: %w", err)
 	}
 
 	// Repository exists - try to open it
 	logger.Info("Opening existing repository", "path", c.repoPath)
 	repo, err := git.PlainOpen(c.repoPath)
 	if err != nil {
-		return fmt.Errorf("failed to open repository at %s (try deleting and re-cloning): %w", c.repoPath, err)
+		// If open fails, try to clone instead
+		logger.Warn("Failed to open existing repository, will clone fresh", "path", c.repoPath, "error", err)
+		// Remove corrupted directory
+		if err := os.RemoveAll(c.repoPath); err != nil {
+			return fmt.Errorf("failed to remove corrupted repository: %w", err)
+		}
+		return c.Clone()
 	}
 
 	c.repo = repo

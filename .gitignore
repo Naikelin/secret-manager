@@ -52,3 +52,4 @@ prod-keys/
 /nginx/ssl/*.pem
 /nginx/ssl/*.key
 /nginx/conf.d/ssl.conf
+.env

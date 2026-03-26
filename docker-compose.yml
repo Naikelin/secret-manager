@@ -38,6 +38,8 @@ services:
       GIT_REPO_URL: ${GIT_REPO_URL:-}
       GIT_BRANCH: ${GIT_BRANCH:-main}
       GIT_AUTH_TYPE: ${GIT_AUTH_TYPE:-ssh}
+      GIT_USERNAME: ${GIT_USERNAME:-}
+      GIT_TOKEN: ${GIT_TOKEN:-}
       GIT_SSH_KEY_PATH: /app/.ssh/id_rsa
       GIT_AUTHOR_NAME: Secret Manager Dev
       GIT_AUTHOR_EMAIL: dev@secret-manager.local
