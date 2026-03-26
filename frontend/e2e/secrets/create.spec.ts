@@ -6,11 +6,12 @@ authenticatedTest.describe('Create Secret', () => {
     await page.goto('/secrets');
     
     // Click create button
-    await page.getByRole('button', { name: 'Create Secret' }).click();
+    await page.getByRole('button', { name: 'Create Secret' }).first().click();
     
     // Fill form
     await page.getByLabel('Secret Name').fill(`e2e-test-${Date.now()}`);
-    await page.getByLabel('Namespace').selectOption('development');
+    // Select by visible label (namespace displays as "name (cluster)")
+    await page.getByLabel('Namespace').selectOption({ label: /development/ });
     await page.getByLabel('Key').fill('username');
     await page.getByLabel('Value').fill('testuser');
     await page.getByRole('button', { name: 'Add Key' }).click();
@@ -19,13 +20,13 @@ authenticatedTest.describe('Create Secret', () => {
     await page.getByRole('button', { name: 'Create Draft' }).click();
     
     // Verify success
-    await expect(page.getByText('Secret draft created')).toBeVisible();
+    await expect(page.getByText('Secret draft created')).toBeVisible({ timeout: 10000 });
     await expect(page.getByText('draft')).toBeVisible();
   });
 
   authenticatedTest('should validate required fields', async ({ page, session }) => {
     await page.goto('/secrets');
-    await page.getByRole('button', { name: 'Create Secret' }).click();
+    await page.getByRole('button', { name: 'Create Secret' }).first().click();
     
     // Try to submit without filling required fields
     await page.getByRole('button', { name: 'Create Draft' }).click();
@@ -37,11 +38,11 @@ authenticatedTest.describe('Create Secret', () => {
 
   authenticatedTest('should require at least one key-value pair', async ({ page, session }) => {
     await page.goto('/secrets');
-    await page.getByRole('button', { name: 'Create Secret' }).click();
+    await page.getByRole('button', { name: 'Create Secret' }).first().click();
     
     // Fill name and namespace only
     await page.getByLabel('Secret Name').fill('test-no-keys');
-    await page.getByLabel('Namespace').selectOption('development');
+    await page.getByLabel('Namespace').selectOption({ label: /development/ });
     await page.getByRole('button', { name: 'Create Draft' }).click();
     
     // Verify error

@@ -6,7 +6,7 @@ authenticatedTest.describe('Delete Secret', () => {
     await page.goto('/secrets');
     
     // Create a test secret first
-    await page.getByRole('button', { name: 'Create Secret' }).click();
+    await page.getByRole('button', { name: 'Create Secret' }).first().click();
     const secretName = `e2e-delete-${Date.now()}`;
     await page.getByLabel('Secret Name').fill(secretName);
     await page.getByLabel('Namespace').selectOption('development');

@@ -1,16 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api, type Namespace, type Secret } from '@/lib/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 
-export default function SecretsPage() {
+function SecretsContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [selectedNs, setSelectedNs] = useState<string>('');
   const [secrets, setSecrets] = useState<Secret[]>([]);
+  const [filteredSecrets, setFilteredSecrets] = useState<Secret[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [publishDialog, setPublishDialog] = useState<{ secret: Secret } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ secret: Secret } | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  useEffect(() => {
+    // Check for success message in URL params
+    const message = searchParams.get('message');
+    if (message) {
+      setSuccessMessage(message);
+      setTimeout(() => setSuccessMessage(''), 5000); // Increased to 5 seconds
+      // Clean up URL
+      window.history.replaceState({}, '', '/secrets');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     loadNamespaces();
@@ -21,6 +39,18 @@ export default function SecretsPage() {
       loadSecrets(selectedNs);
     }
   }, [selectedNs]);
+
+  useEffect(() => {
+    // Filter secrets based on search query
+    if (!searchQuery.trim()) {
+      setFilteredSecrets(secrets);
+    } else {
+      const query = searchQuery.toLowerCase();
+      setFilteredSecrets(
+        secrets.filter((s) => s.secret_name.toLowerCase().includes(query))
+      );
+    }
+  }, [searchQuery, secrets]);
 
   async function loadNamespaces() {
     try {
@@ -43,6 +73,7 @@ export default function SecretsPage() {
       setLoading(true);
       const data = await api.getSecrets(nsId);
       setSecrets(data);
+      setFilteredSecrets(data);
       setError('');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load secrets';
@@ -54,20 +85,50 @@ export default function SecretsPage() {
   }
 
   async function handlePublish(secret: Secret) {
-    if (!confirm(`Publish ${secret.secret_name} to Git?`)) return;
+    setPublishDialog({ secret });
+  }
+
+  async function confirmPublish() {
+    if (!publishDialog) return;
+    
+    const secret = publishDialog.secret;
+    setPublishDialog(null);
+    
     try {
       await api.publishSecret(selectedNs, secret.secret_name);
+      setSuccessMessage('Secret published');
+      setTimeout(() => setSuccessMessage(''), 5000); // Increased to 5 seconds
       loadSecrets(selectedNs);
     } catch (err: any) {
       // Check if it's a drift conflict error
       if (err.response?.status === 409) {
-        alert('❌ Cannot publish: This secret has unresolved drift.\n\n' +
-              'Please resolve the drift first by going to the Drift page.');
-        // Optionally redirect to drift page
-        // router.push(`/drift?secret=${secret.secret_name}&namespace=${selectedNs}`);
+        setError('❌ Cannot publish: This secret has unresolved drift. Please resolve the drift first by going to the Drift page.');
       } else {
-        alert('Failed to publish secret: ' + (err.response?.data?.error || err.message));
+        setError('Failed to publish secret: ' + (err.response?.data?.error || err.message));
       }
+    }
+  }
+
+  async function handleDelete(secret: Secret) {
+    if (secret.status === 'published') {
+      return; // Should not reach here due to disabled button
+    }
+    setDeleteDialog({ secret });
+  }
+
+  async function confirmDelete() {
+    if (!deleteDialog) return;
+    
+    const secret = deleteDialog.secret;
+    setDeleteDialog(null);
+    
+    try {
+      await api.deleteSecret(selectedNs, secret.secret_name);
+      setSuccessMessage('Secret deleted');
+      setTimeout(() => setSuccessMessage(''), 5000); // Increased to 5 seconds
+      loadSecrets(selectedNs);
+    } catch (err: any) {
+      setError('Failed to delete secret: ' + (err.response?.data?.error || err.message));
     }
   }
 
@@ -138,8 +199,9 @@ export default function SecretsPage() {
 
         {/* Namespace Selector */}
         <div className="mb-6 bg-white rounded-xl shadow-md p-6">
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Namespace</label>
+          <label htmlFor="namespace-select" className="block text-sm font-semibold text-gray-700 mb-2">Namespace</label>
           <select
+            id="namespace-select"
             value={selectedNs}
             onChange={(e) => setSelectedNs(e.target.value)}
             className="w-full max-w-md px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
@@ -150,6 +212,19 @@ export default function SecretsPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Search */}
+        <div className="mb-6 bg-white rounded-xl shadow-md p-6">
+          <label htmlFor="search-secrets" className="block text-sm font-semibold text-gray-700 mb-2">Search</label>
+          <input
+            id="search-secrets"
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search secrets..."
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+          />
         </div>
 
         {error && (
@@ -176,86 +251,145 @@ export default function SecretsPage() {
             <thead className="bg-gradient-to-r from-gray-50 to-blue-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Namespace</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Keys</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Updated</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {secrets.length === 0 ? (
+              {filteredSecrets.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-16 text-center">
+                  <td colSpan={4} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <span className="text-6xl mb-4">🔐</span>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No secrets found</h3>
-                      <p className="text-gray-500 mb-4">Create your first secret to get started!</p>
-                      <button
-                        onClick={() => router.push(`/secrets/new?namespace=${selectedNs}`)}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors duration-200"
-                      >
-                        + Create Secret
-                      </button>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        {searchQuery ? 'No secrets found' : 'No secrets found'}
+                      </h3>
+                      <p className="text-gray-500 mb-4">
+                        {searchQuery ? 'Try a different search term' : 'Create your first secret to get started!'}
+                      </p>
+                      {!searchQuery && (
+                        <button
+                          onClick={() => router.push(`/secrets/new?namespace=${selectedNs}`)}
+                          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors duration-200"
+                        >
+                          Create Secret
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
               ) : (
-                secrets.map((secret) => (
-                  <tr key={secret.id} className="hover:bg-gray-50 transition-colors duration-150">
-                    <td className="px-6 py-4 font-semibold text-gray-900">{secret.secret_name}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                        secret.status === 'published' ? 'bg-green-100 text-green-800' :
-                        secret.status === 'drifted' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {secret.status === 'drifted' ? '⚠️ drifted' : secret.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {Object.keys(secret.data).join(', ')}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
-                      {new Date(secret.updated_at).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => router.push(`/secrets/edit/${secret.secret_name}?namespace=${selectedNs}`)}
-                          className="text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors duration-150"
-                          title={secret.status !== 'draft' ? 'Editing will create a new draft version' : 'Edit secret'}
-                        >
-                          Edit
-                          {secret.status !== 'draft' && (
-                            <span className="ml-1 text-xs">✏️</span>
-                          )}
-                        </button>
-                        {secret.status === 'drifted' ? (
-                          <a
-                            href={`/drift?secret=${secret.secret_name}&namespace=${selectedNs}`}
-                            className="text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors duration-150 flex items-center gap-1"
-                            title="Resolve drift before publishing"
-                          >
-                            ⚠️ Resolve Drift
-                          </a>
-                        ) : (secret.status === 'draft' || secret.status === 'published') && (
+                filteredSecrets.map((secret) => {
+                  const namespace = namespaces.find(ns => ns.id === selectedNs);
+                  return (
+                    <tr key={secret.id} className="hover:bg-gray-50 transition-colors duration-150">
+                      <td className="px-6 py-4 font-semibold text-gray-900">{secret.secret_name}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">{namespace?.name || selectedNs}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                          secret.status === 'published' ? 'bg-green-100 text-green-800' :
+                          secret.status === 'drifted' ? 'bg-red-100 text-red-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {secret.status === 'drifted' ? '⚠️ drifted' : secret.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
                           <button
-                            onClick={() => handlePublish(secret)}
-                            className="text-green-600 hover:text-green-800 font-medium hover:underline transition-colors duration-150"
-                            title={secret.status === 'draft' ? 'Publish to Git' : 'Re-publish changes to Git'}
+                            onClick={() => router.push(`/secrets/edit/${secret.secret_name}?namespace=${selectedNs}`)}
+                            className="text-blue-600 hover:text-blue-800 font-medium hover:underline transition-colors duration-150"
+                            title={secret.status !== 'draft' ? 'Editing will create a new draft version' : 'Edit secret'}
                           >
-                            {secret.status === 'draft' ? 'Publish' : 'Re-Publish'}
+                            Edit
+                            {secret.status !== 'draft' && (
+                              <span className="ml-1 text-xs">✏️</span>
+                            )}
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          {secret.status === 'drifted' ? (
+                            <a
+                              href={`/drift?secret=${secret.secret_name}&namespace=${selectedNs}`}
+                              className="text-yellow-600 hover:text-yellow-800 font-medium hover:underline transition-colors duration-150 flex items-center gap-1"
+                              title="Resolve drift before publishing"
+                            >
+                              ⚠️ Resolve Drift
+                            </a>
+                          ) : (secret.status === 'draft' || secret.status === 'published') && (
+                            <button
+                              onClick={() => handlePublish(secret)}
+                              className="text-green-600 hover:text-green-800 font-medium hover:underline transition-colors duration-150"
+                              title={secret.status === 'draft' ? 'Publish to Git' : 'Re-publish changes to Git'}
+                            >
+                              {secret.status === 'draft' ? 'Publish' : 'Re-Publish'}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDelete(secret)}
+                            disabled={secret.status === 'published'}
+                            className="text-red-600 hover:text-red-800 font-medium hover:underline transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={secret.status === 'published' ? 'Cannot delete published secrets' : 'Delete secret'}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Success Message */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+          {successMessage}
+        </div>
+      )}
+
+      {/* Publish Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!publishDialog}
+        title="Publish Secret"
+        message={`Are you sure you want to publish "${publishDialog?.secret.secret_name}" to Git?`}
+        confirmLabel="Confirm Publish"
+        confirmVariant="primary"
+        onConfirm={confirmPublish}
+        onCancel={() => setPublishDialog(null)}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteDialog}
+        title="Delete Secret"
+        message={`Are you sure you want to delete "${deleteDialog?.secret.secret_name}"? This action cannot be undone.`}
+        confirmLabel="Confirm Delete"
+        confirmVariant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteDialog(null)}
+      />
     </div>
+  );
+}
+
+export default function SecretsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-600">Loading...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <SecretsContent />
+    </Suspense>
   );
 }

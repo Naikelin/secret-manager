@@ -6,10 +6,10 @@ authenticatedTest.describe('Secrets List Page', () => {
     await page.goto('/secrets');
     
     // Check table headers
-    await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Namespace' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Actions' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Name', exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Namespace', exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Status', exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Actions', exact: true })).toBeVisible();
     
     // Check at least one secret exists
     const rows = page.getByRole('row');

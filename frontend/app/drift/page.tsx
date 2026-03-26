@@ -58,7 +58,11 @@ export default function DriftPage() {
     try {
       setChecking(true);
       setError('');
-      await api.triggerDriftCheck(selectedNs);
+      // Ensure loading state is visible for at least a brief moment
+      const [_] = await Promise.all([
+        api.triggerDriftCheck(selectedNs),
+        new Promise(resolve => setTimeout(resolve, 300))
+      ]);
       await loadDriftEvents(selectedNs);
     } catch (err) {
       setError('Failed to trigger drift check');
@@ -84,6 +88,33 @@ export default function DriftPage() {
     } catch (err) {
       alert(`Failed to ${label.toLowerCase()}`);
     }
+  }
+
+  // Format relative time (e.g., "2 hours ago", "just now")
+  function formatRelativeTime(timestamp: string): string {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const secondsAgo = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (secondsAgo < 60) return 'just now';
+    if (secondsAgo < 3600) {
+      const minutes = Math.floor(secondsAgo / 60);
+      return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+    }
+    if (secondsAgo < 86400) {
+      const hours = Math.floor(secondsAgo / 3600);
+      return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+    }
+    const days = Math.floor(secondsAgo / 86400);
+    if (days < 30) {
+      return `${days} day${days !== 1 ? 's' : ''} ago`;
+    }
+    const months = Math.floor(days / 30);
+    if (months < 12) {
+      return `${months} month${months !== 1 ? 's' : ''} ago`;
+    }
+    const years = Math.floor(months / 12);
+    return `${years} year${years !== 1 ? 's' : ''} ago`;
   }
 
   // Infer drift type from diff data
@@ -120,13 +151,14 @@ export default function DriftPage() {
     }
   }
 
-  if (loading) return (
+  // Only show loading screen on initial mount before any data loads
+  if (loading && namespaces.length === 0 && !error) return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-yellow-50 p-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading drift events...</p>
+            <p className="mt-4 text-gray-600">Loading drift detection...</p>
           </div>
         </div>
       </div>
@@ -173,12 +205,18 @@ export default function DriftPage() {
             value={selectedNs}
             onChange={(e) => setSelectedNs(e.target.value)}
             className="w-full max-w-md px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all duration-200"
+            disabled={namespaces.length === 0}
+            data-loaded={namespaces.length > 0}
           >
-            {namespaces.map((ns) => (
-              <option key={ns.id} value={ns.id}>
-                {ns.name} ({ns.cluster})
-              </option>
-            ))}
+            {namespaces.length === 0 ? (
+              <option value="">Loading namespaces...</option>
+            ) : (
+              namespaces.map((ns) => (
+                <option key={ns.id} value={ns.id}>
+                  {ns.name} ({ns.cluster})
+                </option>
+              ))
+            )}
           </select>
         </div>
 
@@ -247,7 +285,8 @@ export default function DriftPage() {
                           </div>
 
                           <p className="text-sm text-gray-600 mb-3">
-                            Detected: <span className="font-medium">{new Date(event.detected_at).toLocaleString()}</span>
+                            Detected: <span className="font-medium">{formatRelativeTime(event.detected_at)}</span>
+                            <span className="text-gray-400 ml-2">({new Date(event.detected_at).toLocaleString()})</span>
                           </p>
 
                           {event.diff?.message && (
