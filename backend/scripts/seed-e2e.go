@@ -73,7 +73,42 @@ func main() {
 	}
 	fmt.Println("")
 
-	// Step 5: Create secrets
+	// Step 5: Create groups
+	fmt.Println("👥 Creating groups...")
+	groups, err := createGroups(db)
+	if err != nil {
+		log.Fatalf("Failed to create groups: %v", err)
+	}
+	fmt.Printf("✓ Created %d groups\n", len(groups))
+	for _, g := range groups {
+		fmt.Printf("  - %s (%s)\n", g.Name, g.ID)
+	}
+	fmt.Println("")
+
+	// Step 6: Assign users to groups
+	fmt.Println("🔗 Assigning users to groups...")
+	if err := assignUsersToGroups(db, users, groups); err != nil {
+		log.Fatalf("Failed to assign users to groups: %v", err)
+	}
+	fmt.Println("✓ User-group associations created")
+	fmt.Println("  - admin@example.com → admin")
+	fmt.Println("  - test@example.com → editor")
+	fmt.Println("  - developer@example.com → viewer")
+	fmt.Println("")
+
+	// Step 7: Create group permissions
+	fmt.Println("🔐 Creating group permissions...")
+	permissions, err := createGroupPermissions(db, groups, namespaces)
+	if err != nil {
+		log.Fatalf("Failed to create group permissions: %v", err)
+	}
+	fmt.Printf("✓ Created %d permissions\n", len(permissions))
+	for _, p := range permissions {
+		fmt.Printf("  - %s → %s (%s)\n", p.Group.Name, p.Namespace.Name, p.Role)
+	}
+	fmt.Println("")
+
+	// Step 8: Create secrets
 	fmt.Println("🔐 Creating secrets...")
 	secrets, err := createSecrets(db, namespaces, users)
 	if err != nil {
@@ -85,7 +120,7 @@ func main() {
 	}
 	fmt.Println("")
 
-	// Step 6: Create drift events
+	// Step 9: Create drift events
 	fmt.Println("⚠️  Creating drift events...")
 	driftEvents, err := createDriftEvents(db, namespaces, users)
 	if err != nil {
@@ -105,7 +140,9 @@ func main() {
 	fmt.Println("")
 	fmt.Println("Summary:")
 	fmt.Printf("  Users:        %d\n", len(users))
+	fmt.Printf("  Groups:       %d\n", len(groups))
 	fmt.Printf("  Namespaces:   %d\n", len(namespaces))
+	fmt.Printf("  Permissions:  %d\n", len(permissions))
 	fmt.Printf("  Secrets:      %d\n", len(secrets))
 	fmt.Printf("  Drift Events: %d\n", len(driftEvents))
 }
@@ -200,6 +237,96 @@ func createNamespaces(db *gorm.DB) ([]models.Namespace, error) {
 	}
 
 	return namespaces, nil
+}
+
+func createGroups(db *gorm.DB) ([]models.Group, error) {
+	groups := []models.Group{
+		{
+			ID:   uuid.MustParse("20000000-0000-0000-0000-000000000001"),
+			Name: "admin",
+		},
+		{
+			ID:   uuid.MustParse("20000000-0000-0000-0000-000000000002"),
+			Name: "editor",
+		},
+		{
+			ID:   uuid.MustParse("20000000-0000-0000-0000-000000000003"),
+			Name: "viewer",
+		},
+	}
+
+	for i := range groups {
+		if err := db.Create(&groups[i]).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	return groups, nil
+}
+
+func assignUsersToGroups(db *gorm.DB, users []models.User, groups []models.Group) error {
+	// Map users to groups:
+	// User 1 (admin@example.com) → admin group
+	// User 2 (test@example.com) → editor group
+	// User 3 (developer@example.com) → viewer group
+	associations := []struct {
+		userIdx  int
+		groupIdx int
+	}{
+		{0, 0}, // admin user → admin group
+		{1, 1}, // test user → editor group
+		{2, 2}, // developer user → viewer group
+	}
+
+	for _, assoc := range associations {
+		if err := db.Exec(
+			"INSERT INTO user_groups (user_id, group_id) VALUES (?, ?)",
+			users[assoc.userIdx].ID,
+			groups[assoc.groupIdx].ID,
+		).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func createGroupPermissions(db *gorm.DB, groups []models.Group, namespaces []models.Namespace) ([]models.GroupPermission, error) {
+	// Create permissions for each group across all namespaces
+	// admin → role: admin (full access)
+	// editor → role: editor (read/write/publish)
+	// viewer → role: viewer (read-only)
+
+	var permissions []models.GroupPermission
+
+	// Map group names to roles
+	groupRoles := map[string]string{
+		"admin":  "admin",
+		"editor": "editor",
+		"viewer": "viewer",
+	}
+
+	for _, group := range groups {
+		role := groupRoles[group.Name]
+		for _, ns := range namespaces {
+			perm := models.GroupPermission{
+				ID:          uuid.New(),
+				GroupID:     group.ID,
+				NamespaceID: ns.ID,
+				Role:        role,
+			}
+			if err := db.Create(&perm).Error; err != nil {
+				return nil, err
+			}
+			// Preload relationships for display
+			if err := db.Preload("Group").Preload("Namespace").First(&perm, perm.ID).Error; err != nil {
+				return nil, err
+			}
+			permissions = append(permissions, perm)
+		}
+	}
+
+	return permissions, nil
 }
 
 func createSecrets(db *gorm.DB, namespaces []models.Namespace, users []models.User) ([]models.SecretDraft, error) {
