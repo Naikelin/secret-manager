@@ -11,11 +11,25 @@ export default function Navbar() {
   const [recentDrift, setRecentDrift] = useState<DriftEvent[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if user is authenticated
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    let email = null;
+    if (typeof window !== 'undefined') {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          email = user.email;
+        } catch (e) {
+          console.error('Failed to parse user:', e);
+        }
+      }
+    }
     setIsAuthenticated(!!token);
+    setUserEmail(email);
 
     if (token) {
       loadDriftCount();
@@ -46,6 +60,14 @@ export default function Navbar() {
       );
     } catch (err) {
       console.error('Failed to load drift count:', err);
+    }
+  }
+
+  function handleLogout() {
+    if (confirm('Are you sure you want to logout?')) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      router.push('/auth/login');
     }
   }
 
@@ -121,6 +143,20 @@ export default function Navbar() {
                 )}
               </div>
             )}
+
+            {/* User Menu */}
+            <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-300">
+              {userEmail && (
+                <span className="text-sm text-gray-600">{userEmail}</span>
+              )}
+              <button
+                onClick={handleLogout}
+                className="px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                title="Logout"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
