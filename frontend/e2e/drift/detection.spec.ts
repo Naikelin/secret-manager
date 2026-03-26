@@ -7,7 +7,7 @@ test.describe('Drift Detection Page', () => {
   test('should display drift detection page', async ({ page }) => {
     await page.goto('/drift');
     
-    await expect(page.getByRole('heading', { name: /drift detection/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /drift detection/i, level: 1 })).toBeVisible();
     await expect(page.getByRole('combobox')).toBeVisible();
     await expect(page.getByRole('button', { name: /check for drift/i })).toBeVisible();
   });
