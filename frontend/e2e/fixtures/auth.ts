@@ -1,4 +1,4 @@
-import { test as base } from '@playwright/test';
+import { test as base, Page } from '@playwright/test';
 import * as crypto from 'crypto';
 
 // Generate a valid UUID v4
@@ -69,7 +69,7 @@ const testUser = {
 };
 
 // Mock authenticated state
-export const test = base.extend({
+export const test = base.extend<{ authenticatedPage: Page }>({
   authenticatedPage: async ({ page }, use) => {
     // Set valid JWT auth token
     const token = generateTestJWT();
@@ -82,7 +82,7 @@ export const test = base.extend({
 });
 
 // Authenticated test fixture with automatic auth setup
-export const authenticatedTest = base.extend({
+export const authenticatedTest = base.extend<{ session: { token: string; user: typeof testUser } }>({
   page: async ({ page }, use) => {
     // Set valid JWT auth token before each test
     const token = generateTestJWT();

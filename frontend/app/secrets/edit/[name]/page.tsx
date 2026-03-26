@@ -13,19 +13,71 @@ function EditSecretContent() {
   const namespaceId = searchParams.get('namespace') || '';
   const [secret, setSecret] = useState<Secret | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (namespaceId && name) {
-      // Fetch secret with Git version for comparison
-      api.getSecret(namespaceId, name, true)
-        .then(setSecret)
-        .catch(() => alert('Failed to load secret'))
-        .finally(() => setLoading(false));
+    async function loadSecret() {
+      if (!namespaceId || !name) {
+        setError('Missing namespace or secret name');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Fetch secret with Git version for comparison
+        const secret = await api.getSecret(namespaceId, name, true);
+        setSecret(secret);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load secret');
+      } finally {
+        setLoading(false);
+      }
     }
+
+    loadSecret();
   }, [namespaceId, name]);
 
-  if (loading) return <div className="p-8">Loading...</div>;
-  if (!secret) return <div className="p-8">Secret not found</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-6xl mx-auto text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+          <p className="mt-4 text-gray-600">Loading secret...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="p-4 bg-red-50 border border-red-200 rounded-md text-red-800">
+            <strong>Error:</strong> {error}
+          </div>
+          <button
+            onClick={() => window.history.back()}
+            className="mt-4 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            ← Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!secret) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-6xl mx-auto text-center text-gray-600">
+          Secret not found
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
