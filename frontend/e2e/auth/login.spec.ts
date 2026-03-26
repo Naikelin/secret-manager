@@ -94,7 +94,7 @@ test.describe('Authentication Flow', () => {
     }, { token });
     
     await page.goto('/dashboard');
-    await expect(page.getByText('test@example.com')).toBeVisible();
+    await expect(page.getByText('test@example.com').first()).toBeVisible();
   });
 
   test('should logout and clear storage', async ({ page }) => {
@@ -105,10 +105,10 @@ test.describe('Authentication Flow', () => {
     }, { token });
     
     await page.goto('/dashboard');
-    await page.getByRole('button', { name: /logout/i }).click();
     
-    // Confirm dialog
+    // Set up dialog handler BEFORE clicking logout
     page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('button', { name: /logout/i }).click();
     
     await expect(page).toHaveURL(/.*login/);
     
