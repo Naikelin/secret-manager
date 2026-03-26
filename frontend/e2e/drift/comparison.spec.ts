@@ -33,8 +33,8 @@ test.describe('Drift Visual Comparison', () => {
       await page.waitForTimeout(1000);
       
       // Verify comparison headers
-      await expect(page.getByText(/git.*source of truth/i)).toBeVisible();
-      await expect(page.getByText(/kubernetes.*actual state/i)).toBeVisible();
+      await expect(page.getByText(/git.*source of truth/i).first()).toBeVisible();
+      await expect(page.getByText(/kubernetes.*actual state/i).first()).toBeVisible();
     } else {
       test.skip('No drift events with expand button available');
     }
@@ -94,7 +94,7 @@ test.describe('Drift Visual Comparison', () => {
       // Expand
       await expandButton.click();
       await page.waitForTimeout(1000);
-      await expect(page.getByText(/git.*source of truth/i)).toBeVisible();
+      await expect(page.getByText(/git.*source of truth/i).first()).toBeVisible();
       
       // Collapse - find the same button (text should have changed to collapse)
       const collapseButton = page.locator('button').filter({ hasText: /▼|collapse/i }).first();
@@ -146,7 +146,7 @@ test.describe('Drift Visual Comparison', () => {
       await page.waitForTimeout(500);
       
       // Eventually should show comparison content
-      await expect(page.getByText(/git|kubernetes|source of truth/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/git|kubernetes|source of truth/i).first()).toBeVisible({ timeout: 5000 });
     } else {
       test.skip('No drift events with expand button available');
     }

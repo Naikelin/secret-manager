@@ -51,7 +51,7 @@ test.describe('Drift Resolution Actions', () => {
       return;
     }
     
-    const syncButton = driftCard.getByRole('button', { name: /sync from git/i });
+    const syncButton = driftCard.getByRole('button', { name: /sync from git/i }).first();
     
     if (await syncButton.count() > 0) {
       // Setup dialog handler BEFORE clicking
@@ -81,7 +81,7 @@ test.describe('Drift Resolution Actions', () => {
       return;
     }
     
-    const importButton = driftCard.getByRole('button', { name: /import to git/i });
+    const importButton = driftCard.getByRole('button', { name: /import to git/i }).first();
     
     if (await importButton.count() > 0) {
       let dialogShown = false;
@@ -108,7 +108,7 @@ test.describe('Drift Resolution Actions', () => {
       return;
     }
     
-    const markButton = driftCard.getByRole('button', { name: /mark resolved|mark as resolved/i });
+    const markButton = driftCard.getByRole('button', { name: /mark resolved|mark as resolved/i }).first();
     
     if (await markButton.count() > 0) {
       let dialogShown = false;
@@ -135,7 +135,7 @@ test.describe('Drift Resolution Actions', () => {
       return;
     }
     
-    const syncButton = driftCard.getByRole('button', { name: /sync from git/i });
+    const syncButton = driftCard.getByRole('button', { name: /sync from git/i }).first();
     
     if (await syncButton.count() > 0) {
       // Dismiss dialog
@@ -164,7 +164,7 @@ test.describe('Drift Resolution Actions', () => {
       return;
     }
     
-    const syncButton = driftCard.getByRole('button', { name: /sync from git/i });
+    const syncButton = driftCard.getByRole('button', { name: /sync from git/i }).first();
     
     if (await syncButton.count() > 0) {
       // Accept dialog
@@ -192,7 +192,7 @@ test.describe('Drift Resolution Actions', () => {
       return;
     }
     
-    const syncButton = driftCard.getByRole('button', { name: /sync from git/i });
+    const syncButton = driftCard.getByRole('button', { name: /sync from git/i }).first();
     
     if (await syncButton.count() > 0) {
       // Mock slow API response
