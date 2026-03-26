@@ -1,0 +1,204 @@
+name: E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    
+    # Use Playwright container with all system dependencies
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-jammy
+      options: --user root
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: secretmanager
+          POSTGRES_USER: dev
+          POSTGRES_PASSWORD: devpass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgres://dev:devpass@postgres:5432/secretmanager?sslmode=disable
+      FRONTEND_URL: http://localhost:3000
+      BACKEND_URL: http://localhost:8080
+      PORT: 8080
+      LOG_LEVEL: info
+      JWT_SECRET: test-secret-for-ci
+      AUTH_PROVIDER: mock
+      GIT_REPO_PATH: /tmp/secrets-repo
+      GIT_BRANCH: main
+      SOPS_ENABLED: false
+      K8S_KUBECONFIG: ""
+      CI: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go 1.26
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: backend/go.sum
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          go mod download
+          go mod verify
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Initialize Git repository for secrets
+        run: |
+          mkdir -p /tmp/secrets-repo
+          cd /tmp/secrets-repo
+          git init
+          git config user.email "ci@example.com"
+          git config user.name "CI Bot"
+          git commit --allow-empty -m "Initial commit"
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL..."
+          for i in {1..30}; do
+            if pg_isready -h postgres -U dev -d secretmanager; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Build backend
+        run: |
+          cd backend
+          go build -o bin/server ./cmd/server
+
+      - name: Start backend server
+        run: |
+          cd backend
+          ./bin/server > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+          echo "Backend started with PID $(cat /tmp/backend.pid)"
+
+      - name: Wait for backend health check
+        run: |
+          echo "Waiting for backend..."
+          for i in {1..60}; do
+            if curl -f http://localhost:8080/health > /dev/null 2>&1; then
+              echo "Backend is healthy!"
+              curl http://localhost:8080/health
+              break
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 2
+          done
+          # Verify backend is actually responding
+          if ! curl -f http://localhost:8080/health; then
+            echo "Backend failed to start. Logs:"
+            cat /tmp/backend.log
+            exit 1
+          fi
+
+      - name: Start frontend dev server
+        run: |
+          cd frontend
+          npm run dev > /tmp/frontend.log 2>&1 &
+          echo $! > /tmp/frontend.pid
+          echo "Frontend started with PID $(cat /tmp/frontend.pid)"
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8080
+
+      - name: Wait for frontend to be ready
+        run: |
+          echo "Waiting for frontend..."
+          for i in {1..120}; do
+            if curl -f http://localhost:3000 > /dev/null 2>&1; then
+              echo "Frontend is ready!"
+              break
+            fi
+            echo "Waiting... ($i/120)"
+            sleep 2
+          done
+          # Verify frontend is actually responding
+          if ! curl -f http://localhost:3000 > /dev/null 2>&1; then
+            echo "Frontend failed to start. Logs:"
+            tail -n 100 /tmp/frontend.log
+            exit 1
+          fi
+
+      - name: Run Playwright E2E tests
+        run: |
+          cd frontend
+          npm run test:e2e
+        env:
+          CI: true
+
+      - name: Upload test report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload test traces (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7
+
+      - name: Upload backend logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-logs
+          path: /tmp/backend.log
+          retention-days: 7
+
+      - name: Upload frontend logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-logs
+          path: /tmp/frontend.log
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: |
+          if [ -f /tmp/backend.pid ]; then
+            kill $(cat /tmp/backend.pid) || true
+          fi
+          if [ -f /tmp/frontend.pid ]; then
+            kill $(cat /tmp/frontend.pid) || true
+          fi

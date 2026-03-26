@@ -1,5 +1,7 @@
 # Secret Manager
 
+[![E2E Tests](https://github.com/Naikelin/secret-manager/actions/workflows/e2e-tests.yml/badge.svg)](https://github.com/Naikelin/secret-manager/actions/workflows/e2e-tests.yml)
+
 GitOps-based Kubernetes Secret Management with SOPS encryption and FluxCD auto-sync.
 
 ## Features
