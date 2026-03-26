@@ -49,6 +49,7 @@ services:
       LOG_LEVEL: debug
       AUTH_PROVIDER: mock
       JWT_SECRET: dev-secret-change-in-production
+      FRONTEND_URL: http://frontend:3000
       GIT_REPO_PATH: /data/secrets-repo
       SOPS_AGE_KEY_FILE: /keys/age.txt
       GIT_REPO_URL: ${GIT_REPO_URL:-}
