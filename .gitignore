@@ -2,6 +2,7 @@
 /backend/bin/
 /backend/tmp/
 /backend/.env
+/backend/server
 
 # Frontend
 /frontend/node_modules/
