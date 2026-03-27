@@ -18,6 +18,7 @@ type Config struct {
 	DatabaseURL    string
 	GitRepoPath    string
 	K8sKubeconfig  string
+	KubeconfigsDir string
 	FluxNamespace  string
 	AuthProvider   string
 	SOPSAgeKeyFile string
@@ -60,6 +61,7 @@ func Load() (*Config, error) {
 		DatabaseURL:    getEnv("DATABASE_URL", "postgres://dev:devpass@localhost:5432/secretmanager?sslmode=disable"),
 		GitRepoPath:    getEnv("GIT_REPO_PATH", "/data/secrets-repo"),
 		K8sKubeconfig:  getEnv("K8S_KUBECONFIG", ""),
+		KubeconfigsDir: getEnv("K8S_KUBECONFIGS_DIR", "/etc/kubeconfigs"),
 		FluxNamespace:  getEnv("FLUX_NAMESPACE", "flux-system"),
 		AuthProvider:   getEnv("AUTH_PROVIDER", "mock"),
 		SOPSAgeKeyFile: getEnv("SOPS_AGE_KEY_FILE", "/keys/age.txt"),

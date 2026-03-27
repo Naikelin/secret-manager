@@ -95,6 +95,13 @@ func main() {
 	var driftDetector *drift.DriftDetector
 	k8sClient, gitClient, sopsClient := initClientsForDrift(cfg)
 
+	// Initialize ClientManager for multi-cluster support
+	// Note: Single K8sClient still used for backward compatibility with drift detector
+	// TODO Phase 4: Pass clientManager to api.NewRouter() for cluster-scoped endpoints
+	// TODO Phase 5: Migrate drift detector to use ClientManager
+	_ = k8s.NewClientManager(cfg.KubeconfigsDir, db)
+	logger.Info("ClientManager initialized successfully", "kubeconfigsDir", cfg.KubeconfigsDir)
+
 	// Sync secrets from Git to DB on startup
 	if gitClient != nil && sopsClient != nil {
 		syncer := gitsync.NewSyncer(db, gitClient, sopsClient)
