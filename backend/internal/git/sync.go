@@ -69,7 +69,37 @@ func (c *GitClient) EnsureRepo() error {
 }
 
 // GetFilePath returns the standardized path for a secret file in the repository
+// Format: clusters/{cluster}/namespaces/{namespace}/secrets/{secretName}.yaml
+func (c *GitClient) GetFilePath(clusterName, namespace, secretName string) string {
+	return filepath.Join("clusters", clusterName, "namespaces", namespace, "secrets", fmt.Sprintf("%s.yaml", secretName))
+}
+
+// GetFilePathLegacy returns the old flat path format for backward compatibility
 // Format: namespaces/{namespace}/secrets/{secretName}.yaml
-func (c *GitClient) GetFilePath(namespace, secretName string) string {
+// TODO: Remove after migration complete
+func (c *GitClient) GetFilePathLegacy(namespace, secretName string) string {
 	return filepath.Join("namespaces", namespace, "secrets", fmt.Sprintf("%s.yaml", secretName))
+}
+
+// ReadFileWithFallback tries to read from new cluster-first path, falls back to legacy path
+// Returns: content, pathUsed, error
+func (c *GitClient) ReadFileWithFallback(clusterName, namespace, secretName string) ([]byte, string, error) {
+	// Try new cluster-first path first
+	newPath := c.GetFilePath(clusterName, namespace, secretName)
+	content, err := c.ReadFile(newPath)
+	if err == nil {
+		logger.Debug("[DualPath] Read from new path", "path", newPath)
+		return content, newPath, nil
+	}
+
+	// Fallback to legacy path
+	oldPath := c.GetFilePathLegacy(namespace, secretName)
+	content, err = c.ReadFile(oldPath)
+	if err == nil {
+		logger.Info("[DualPath] Fallback to legacy path (TODO: migrate this secret)", "path", oldPath)
+		return content, oldPath, nil
+	}
+
+	// Neither path exists
+	return nil, "", fmt.Errorf("secret not found in new path (%s) or legacy path (%s)", newPath, oldPath)
 }

@@ -28,7 +28,9 @@ type GitClientInterface interface {
 	WriteFile(path string, content []byte) error
 	Commit(message, authorName string, files []string) (string, error)
 	Push() error
-	GetFilePath(namespace, secretName string) string
+	GetFilePath(clusterName, namespace, secretName string) string
+	GetFilePathLegacy(namespace, secretName string) string
+	ReadFileWithFallback(clusterName, namespace, secretName string) ([]byte, string, error)
 }
 
 // SOPSClientInterface defines the SOPS operations needed for drift detection
@@ -130,10 +132,15 @@ func (d *DriftDetector) DetectDriftForSecret(secretID uuid.UUID) (*models.DriftE
 		return nil, nil
 	}
 
-	// Load namespace
+	// Load namespace with cluster relationship
 	var namespace models.Namespace
-	if err := d.db.First(&namespace, secret.NamespaceID).Error; err != nil {
+	if err := d.db.Preload("ClusterRef").First(&namespace, secret.NamespaceID).Error; err != nil {
 		return nil, fmt.Errorf("failed to load namespace: %w", err)
+	}
+
+	// Validate cluster exists
+	if namespace.ClusterRef == nil {
+		return nil, fmt.Errorf("namespace has no cluster association")
 	}
 
 	// Check for drift
@@ -143,8 +150,18 @@ func (d *DriftDetector) DetectDriftForSecret(secretID uuid.UUID) (*models.DriftE
 // compareDrift performs the actual drift comparison
 func (d *DriftDetector) compareDrift(secret *models.SecretDraft, namespace *models.Namespace) (*models.DriftEvent, error) {
 	// 1. Decrypt secret from Git using SOPS
-	filePath := d.gitClient.GetFilePath(namespace.Name, secret.SecretName)
-	encryptedYAML, err := d.gitClient.ReadFile(filePath)
+	var encryptedYAML []byte
+	var filePath string
+	var err error
+
+	// Try dual-path mode if enabled (backward compatibility during migration)
+	if d.cfg.EnableDualPathMode {
+		encryptedYAML, filePath, err = d.gitClient.ReadFileWithFallback(namespace.ClusterRef.Name, namespace.Name, secret.SecretName)
+	} else {
+		filePath = d.gitClient.GetFilePath(namespace.ClusterRef.Name, namespace.Name, secret.SecretName)
+		encryptedYAML, err = d.gitClient.ReadFile(filePath)
+	}
+
 	if err != nil {
 		// File missing from Git - this is drift!
 		gitVersion := make(map[string]interface{})
@@ -371,14 +388,19 @@ func (d *DriftDetector) SyncFromGit(ctx context.Context, driftEventID uuid.UUID)
 		return fmt.Errorf("drift event already resolved at %s", driftEvent.ResolvedAt)
 	}
 
-	// 2. Load namespace
+	// 2. Load namespace with cluster relationship
 	var namespace models.Namespace
-	if err := d.db.First(&namespace, driftEvent.NamespaceID).Error; err != nil {
+	if err := d.db.Preload("ClusterRef").First(&namespace, driftEvent.NamespaceID).Error; err != nil {
 		return fmt.Errorf("failed to load namespace: %w", err)
 	}
 
+	// Validate cluster exists
+	if namespace.ClusterRef == nil {
+		return fmt.Errorf("namespace has no cluster association")
+	}
+
 	// 3. Get secret YAML from Git repo
-	filePath := d.gitClient.GetFilePath(namespace.Name, driftEvent.SecretName)
+	filePath := d.gitClient.GetFilePath(namespace.ClusterRef.Name, namespace.Name, driftEvent.SecretName)
 	encryptedYAML, err := d.gitClient.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read secret from Git: %w", err)
@@ -493,10 +515,15 @@ func (d *DriftDetector) ImportToGit(ctx context.Context, driftEventID uuid.UUID)
 		return fmt.Errorf("drift event already resolved at %s", driftEvent.ResolvedAt)
 	}
 
-	// 2. Load namespace
+	// 2. Load namespace with cluster relationship
 	var namespace models.Namespace
-	if err := d.db.First(&namespace, driftEvent.NamespaceID).Error; err != nil {
+	if err := d.db.Preload("ClusterRef").First(&namespace, driftEvent.NamespaceID).Error; err != nil {
 		return fmt.Errorf("failed to load namespace: %w", err)
+	}
+
+	// Validate cluster exists
+	if namespace.ClusterRef == nil {
+		return fmt.Errorf("namespace has no cluster association")
 	}
 
 	// 3. Get secret from K8s
@@ -518,7 +545,7 @@ func (d *DriftDetector) ImportToGit(ctx context.Context, driftEventID uuid.UUID)
 	}
 
 	// 6. Commit to Git
-	filePath := d.gitClient.GetFilePath(namespace.Name, driftEvent.SecretName)
+	filePath := d.gitClient.GetFilePath(namespace.ClusterRef.Name, namespace.Name, driftEvent.SecretName)
 	if err := d.gitClient.WriteFile(filePath, encryptedYAML); err != nil {
 		return fmt.Errorf("failed to write secret to Git: %w", err)
 	}
@@ -638,8 +665,19 @@ func (d *DriftDetector) GetComparisonData(namespace, secretName string) (map[str
 	gitData := make(map[string]string)
 	k8sData := make(map[string]string)
 
+	// Load namespace from DB to get cluster name
+	var ns models.Namespace
+	if err := d.db.Preload("ClusterRef").Where("name = ?", namespace).First(&ns).Error; err != nil {
+		return nil, nil, fmt.Errorf("failed to load namespace: %w", err)
+	}
+
+	// Validate cluster exists
+	if ns.ClusterRef == nil {
+		return nil, nil, fmt.Errorf("namespace has no cluster association")
+	}
+
 	// 1. Fetch Git version
-	filePath := d.gitClient.GetFilePath(namespace, secretName)
+	filePath := d.gitClient.GetFilePath(ns.ClusterRef.Name, namespace, secretName)
 	encryptedYAML, err := d.gitClient.ReadFile(filePath)
 	if err != nil {
 		// File missing from Git

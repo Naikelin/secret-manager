@@ -27,15 +27,17 @@ func init() {
 
 // MockGitClient is a mock implementation of GitClient for testing
 type MockGitClient struct {
-	EnsureRepoFunc    func() error
-	WriteFileFunc     func(path string, content []byte) error
-	ReadFileFunc      func(path string) ([]byte, error)
-	CommitFunc        func(message, authorName string, files []string) (string, error)
-	PushFunc          func() error
-	FileExistsFunc    func(path string) (bool, error)
-	GetFilePathFunc   func(namespace, secretName string) string
-	RepoPathFunc      func() string
-	GetCurrentSHAFunc func() (string, error)
+	EnsureRepoFunc           func() error
+	WriteFileFunc            func(path string, content []byte) error
+	ReadFileFunc             func(path string) ([]byte, error)
+	CommitFunc               func(message, authorName string, files []string) (string, error)
+	PushFunc                 func() error
+	FileExistsFunc           func(path string) (bool, error)
+	GetFilePathFunc          func(clusterName, namespace, secretName string) string
+	GetFilePathLegacyFunc    func(namespace, secretName string) string
+	ReadFileWithFallbackFunc func(clusterName, namespace, secretName string) ([]byte, string, error)
+	RepoPathFunc             func() string
+	GetCurrentSHAFunc        func() (string, error)
 }
 
 func (m *MockGitClient) EnsureRepo() error {
@@ -80,11 +82,36 @@ func (m *MockGitClient) FileExists(path string) (bool, error) {
 	return true, nil
 }
 
-func (m *MockGitClient) GetFilePath(namespace, secretName string) string {
+func (m *MockGitClient) GetFilePath(clusterName, namespace, secretName string) string {
 	if m.GetFilePathFunc != nil {
-		return m.GetFilePathFunc(namespace, secretName)
+		return m.GetFilePathFunc(clusterName, namespace, secretName)
+	}
+	return fmt.Sprintf("clusters/%s/namespaces/%s/secrets/%s.yaml", clusterName, namespace, secretName)
+}
+
+func (m *MockGitClient) GetFilePathLegacy(namespace, secretName string) string {
+	if m.GetFilePathLegacyFunc != nil {
+		return m.GetFilePathLegacyFunc(namespace, secretName)
 	}
 	return fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespace, secretName)
+}
+
+func (m *MockGitClient) ReadFileWithFallback(clusterName, namespace, secretName string) ([]byte, string, error) {
+	if m.ReadFileWithFallbackFunc != nil {
+		return m.ReadFileWithFallbackFunc(clusterName, namespace, secretName)
+	}
+	// Default: try new path first
+	newPath := m.GetFilePath(clusterName, namespace, secretName)
+	content, err := m.ReadFile(newPath)
+	if err == nil {
+		return content, newPath, nil
+	}
+	legacyPath := m.GetFilePathLegacy(namespace, secretName)
+	content, err = m.ReadFile(legacyPath)
+	if err == nil {
+		return content, legacyPath, nil
+	}
+	return nil, "", fmt.Errorf("file not found in either path")
 }
 
 func (m *MockGitClient) RepoPath() string {

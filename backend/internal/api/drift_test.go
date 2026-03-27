@@ -25,12 +25,14 @@ import (
 
 // Mock types for drift testing
 type driftMockGitClient struct {
-	readFileFunc    func(path string) ([]byte, error)
-	writeFileFunc   func(path string, content []byte) error
-	commitFunc      func(message, authorName string, files []string) (string, error)
-	pushFunc        func() error
-	ensureRepoFunc  func() error
-	getFilePathFunc func(namespace, secretName string) string
+	readFileFunc             func(path string) ([]byte, error)
+	writeFileFunc            func(path string, content []byte) error
+	commitFunc               func(message, authorName string, files []string) (string, error)
+	pushFunc                 func() error
+	ensureRepoFunc           func() error
+	getFilePathFunc          func(clusterName, namespace, secretName string) string
+	getFilePathLegacyFunc    func(namespace, secretName string) string
+	readFileWithFallbackFunc func(clusterName, namespace, secretName string) ([]byte, string, error)
 }
 
 func (m *driftMockGitClient) ReadFile(path string) ([]byte, error) {
@@ -68,11 +70,36 @@ func (m *driftMockGitClient) EnsureRepo() error {
 	return nil
 }
 
-func (m *driftMockGitClient) GetFilePath(namespace, secretName string) string {
+func (m *driftMockGitClient) GetFilePath(clusterName, namespace, secretName string) string {
 	if m.getFilePathFunc != nil {
-		return m.getFilePathFunc(namespace, secretName)
+		return m.getFilePathFunc(clusterName, namespace, secretName)
+	}
+	return fmt.Sprintf("clusters/%s/namespaces/%s/secrets/%s.yaml", clusterName, namespace, secretName)
+}
+
+func (m *driftMockGitClient) GetFilePathLegacy(namespace, secretName string) string {
+	if m.getFilePathLegacyFunc != nil {
+		return m.getFilePathLegacyFunc(namespace, secretName)
 	}
 	return fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespace, secretName)
+}
+
+func (m *driftMockGitClient) ReadFileWithFallback(clusterName, namespace, secretName string) ([]byte, string, error) {
+	if m.readFileWithFallbackFunc != nil {
+		return m.readFileWithFallbackFunc(clusterName, namespace, secretName)
+	}
+	// Default: try new path first
+	newPath := m.GetFilePath(clusterName, namespace, secretName)
+	content, err := m.ReadFile(newPath)
+	if err == nil {
+		return content, newPath, nil
+	}
+	legacyPath := m.GetFilePathLegacy(namespace, secretName)
+	content, err = m.ReadFile(legacyPath)
+	if err == nil {
+		return content, legacyPath, nil
+	}
+	return nil, "", fmt.Errorf("file not found in either path")
 }
 
 type driftMockSOPSClient struct {

@@ -91,6 +91,8 @@ func (s *Syncer) SyncAll() error {
 func (s *Syncer) syncNamespace(namespace models.Namespace, gitSHA string) (synced, skipped, errors int) {
 	logger.Info("[GitSync] Syncing namespace", "namespace", namespace.Name)
 
+	// TODO: Add dual-path support - try new cluster-first path, fallback to old path
+	// For now, using old path format for backward compatibility during migration
 	// Build path to namespace secrets directory
 	secretsDir := filepath.Join(s.gitClient.RepoPath(), "namespaces", namespace.Name, "secrets")
 
@@ -284,6 +286,8 @@ func (s *Syncer) SyncSecret(namespaceName, secretName string) error {
 	}
 
 	// 4. Read secret file from Git
+	// TODO: Add dual-path support - try new cluster-first path first, fallback to old path
+	// For now, using old path format for backward compatibility during migration
 	secretPath := fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespaceName, secretName)
 	content, err := s.gitClient.ReadFile(secretPath)
 	if err != nil {
@@ -379,6 +383,8 @@ func (s *Syncer) ReadSecretFromGit(namespaceName, secretName string) (map[string
 	}
 
 	// 2. Read secret file from Git
+	// TODO: Add dual-path support - try new cluster-first path first, fallback to old path
+	// For now, using old path format for backward compatibility during migration
 	secretPath := fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespaceName, secretName)
 	content, err := s.gitClient.ReadFile(secretPath)
 	if err != nil {

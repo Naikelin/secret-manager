@@ -24,7 +24,7 @@ import (
 )
 
 // NewRouter creates and configures the HTTP router
-func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
+func NewRouter(db *gorm.DB, cfg *config.Config, clientManager k8s.ClientManager) http.Handler {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -131,6 +131,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 	// Initialize namespace handlers
 	namespaceHandlers := NewNamespaceHandlers(db)
 
+	// Initialize cluster handlers
+	clusterHandlers := NewClusterHandlers(db, clientManager)
+
 	// Initialize audit handlers
 	auditHandlers := NewAuditHandlers(db)
 
@@ -151,6 +154,16 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 				nsID := chi.URLParam(r, "namespace")
 				return uuid.Parse(nsID)
 			}
+
+			// Cluster CRUD endpoints
+			r.Get("/clusters", clusterHandlers.ListClusters)
+			r.Post("/clusters", clusterHandlers.CreateCluster)
+			r.Route("/clusters/{id}", func(r chi.Router) {
+				r.Get("/", clusterHandlers.GetCluster)
+				r.Delete("/", clusterHandlers.DeleteCluster)
+				r.Get("/health", clusterHandlers.GetClusterHealth)
+				r.Get("/namespaces", clusterHandlers.ListClusterNamespaces)
+			})
 
 			// Namespaces - list all accessible namespaces
 			r.Get("/namespaces", namespaceHandlers.ListNamespaces)

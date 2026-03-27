@@ -26,7 +26,9 @@ type GitClientInterface interface {
 	Commit(message, authorName string, files []string) (string, error)
 	Push() error
 	FileExists(path string) (bool, error)
-	GetFilePath(namespace, secretName string) string
+	GetFilePath(clusterName, namespace, secretName string) string
+	GetFilePathLegacy(namespace, secretName string) string
+	ReadFileWithFallback(clusterName, namespace, secretName string) ([]byte, string, error)
 	RepoPath() string
 	GetCurrentSHA() (string, error)
 }
@@ -116,15 +118,22 @@ func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Fetch namespace to get the name
+	// Fetch namespace to get the name and preload cluster relationship
 	var namespace models.Namespace
-	if err := h.db.First(&namespace, "id = ?", namespaceID).Error; err != nil {
+	if err := h.db.Preload("ClusterRef").First(&namespace, "id = ?", namespaceID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			respondError(w, http.StatusNotFound, "Namespace not found")
 		} else {
 			logger.Error("Failed to fetch namespace", "error", err)
 			respondError(w, http.StatusInternalServerError, "Failed to fetch namespace")
 		}
+		return
+	}
+
+	// Validate cluster relationship exists
+	if namespace.ClusterRef == nil {
+		logger.Error("Namespace has no cluster association", "namespace_id", namespaceID)
+		respondError(w, http.StatusInternalServerError, "Namespace has no cluster association")
 		return
 	}
 
@@ -175,7 +184,7 @@ func (h *PublishHandlers) PublishSecret(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Write encrypted YAML to Git repo
-	filePath := h.gitClient.GetFilePath(namespace.Name, secretName)
+	filePath := h.gitClient.GetFilePath(namespace.ClusterRef.Name, namespace.Name, secretName)
 	if err := h.gitClient.WriteFile(filePath, encryptedYAML); err != nil {
 		logger.Error("Failed to write secret file to Git", "error", err, "path", filePath)
 		respondError(w, http.StatusInternalServerError, "Failed to write secret to Git repository")
@@ -268,15 +277,22 @@ func (h *PublishHandlers) UnpublishSecret(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Fetch namespace to get the name
+	// Fetch namespace to get the name and preload cluster relationship
 	var namespace models.Namespace
-	if err := h.db.First(&namespace, "id = ?", namespaceID).Error; err != nil {
+	if err := h.db.Preload("ClusterRef").First(&namespace, "id = ?", namespaceID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			respondError(w, http.StatusNotFound, "Namespace not found")
 		} else {
 			logger.Error("Failed to fetch namespace", "error", err)
 			respondError(w, http.StatusInternalServerError, "Failed to fetch namespace")
 		}
+		return
+	}
+
+	// Validate cluster relationship exists
+	if namespace.ClusterRef == nil {
+		logger.Error("Namespace has no cluster association", "namespace_id", namespaceID)
+		respondError(w, http.StatusInternalServerError, "Namespace has no cluster association")
 		return
 	}
 
@@ -306,7 +322,7 @@ func (h *PublishHandlers) UnpublishSecret(w http.ResponseWriter, r *http.Request
 	}
 
 	// Delete file from Git repo
-	filePath := h.gitClient.GetFilePath(namespace.Name, secretName)
+	filePath := h.gitClient.GetFilePath(namespace.ClusterRef.Name, namespace.Name, secretName)
 
 	// Check if file exists before attempting to delete
 	exists, err := h.gitClient.FileExists(filePath)

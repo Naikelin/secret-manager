@@ -29,12 +29,14 @@ func init() {
 
 // MockGitClient for testing
 type MockGitClient struct {
-	EnsureRepoFunc  func() error
-	ReadFileFunc    func(path string) ([]byte, error)
-	WriteFileFunc   func(path string, content []byte) error
-	CommitFunc      func(message, authorName string, files []string) (string, error)
-	PushFunc        func() error
-	GetFilePathFunc func(namespace, secretName string) string
+	EnsureRepoFunc           func() error
+	ReadFileFunc             func(path string) ([]byte, error)
+	WriteFileFunc            func(path string, content []byte) error
+	CommitFunc               func(message, authorName string, files []string) (string, error)
+	PushFunc                 func() error
+	GetFilePathFunc          func(clusterName, namespace, secretName string) string
+	GetFilePathLegacyFunc    func(namespace, secretName string) string
+	ReadFileWithFallbackFunc func(clusterName, namespace, secretName string) ([]byte, string, error)
 }
 
 func (m *MockGitClient) EnsureRepo() error {
@@ -72,11 +74,36 @@ func (m *MockGitClient) Push() error {
 	return nil
 }
 
-func (m *MockGitClient) GetFilePath(namespace, secretName string) string {
+func (m *MockGitClient) GetFilePath(clusterName, namespace, secretName string) string {
 	if m.GetFilePathFunc != nil {
-		return m.GetFilePathFunc(namespace, secretName)
+		return m.GetFilePathFunc(clusterName, namespace, secretName)
+	}
+	return fmt.Sprintf("clusters/%s/namespaces/%s/secrets/%s.yaml", clusterName, namespace, secretName)
+}
+
+func (m *MockGitClient) GetFilePathLegacy(namespace, secretName string) string {
+	if m.GetFilePathLegacyFunc != nil {
+		return m.GetFilePathLegacyFunc(namespace, secretName)
 	}
 	return fmt.Sprintf("namespaces/%s/secrets/%s.yaml", namespace, secretName)
+}
+
+func (m *MockGitClient) ReadFileWithFallback(clusterName, namespace, secretName string) ([]byte, string, error) {
+	if m.ReadFileWithFallbackFunc != nil {
+		return m.ReadFileWithFallbackFunc(clusterName, namespace, secretName)
+	}
+	// Default implementation: try new path, fallback to legacy
+	newPath := m.GetFilePath(clusterName, namespace, secretName)
+	content, err := m.ReadFile(newPath)
+	if err == nil {
+		return content, newPath, nil
+	}
+	legacyPath := m.GetFilePathLegacy(namespace, secretName)
+	content, err = m.ReadFile(legacyPath)
+	if err == nil {
+		return content, legacyPath, nil
+	}
+	return nil, "", fmt.Errorf("file not found in either path")
 }
 
 // MockSOPSClient for testing

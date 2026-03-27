@@ -97,9 +97,8 @@ func main() {
 
 	// Initialize ClientManager for multi-cluster support
 	// Note: Single K8sClient still used for backward compatibility with drift detector
-	// TODO Phase 4: Pass clientManager to api.NewRouter() for cluster-scoped endpoints
 	// TODO Phase 5: Migrate drift detector to use ClientManager
-	_ = k8s.NewClientManager(cfg.KubeconfigsDir, db)
+	clientManager := k8s.NewClientManager(cfg.KubeconfigsDir, db)
 	logger.Info("ClientManager initialized successfully", "kubeconfigsDir", cfg.KubeconfigsDir)
 
 	// Sync secrets from Git to DB on startup
@@ -150,7 +149,7 @@ func main() {
 	}
 
 	// Create router
-	router := api.NewRouter(db, cfg)
+	router := api.NewRouter(db, cfg, clientManager)
 
 	// Create HTTP server
 	srv := &http.Server{

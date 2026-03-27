@@ -47,6 +47,9 @@ type Config struct {
 	FluxGitRepositoryName string        `env:"FLUX_GITREPOSITORY_NAME" envDefault:"secrets-repo"`
 	FluxReconcileTimeout  time.Duration `env:"FLUX_RECONCILE_TIMEOUT" envDefault:"2m"`
 	FluxPollInterval      time.Duration `env:"FLUX_POLL_INTERVAL" envDefault:"2s"`
+
+	// Multi-cluster Git migration flags
+	EnableDualPathMode bool `env:"ENABLE_DUAL_PATH_MODE" envDefault:"false"`
 }
 
 // Load reads configuration from environment variables
@@ -90,6 +93,9 @@ func Load() (*Config, error) {
 		FluxGitRepositoryName: getEnv("FLUX_GITREPOSITORY_NAME", "secrets-repo"),
 		FluxReconcileTimeout:  getEnvDuration("FLUX_RECONCILE_TIMEOUT", 2*time.Minute),
 		FluxPollInterval:      getEnvDuration("FLUX_POLL_INTERVAL", 2*time.Second),
+
+		// Multi-cluster Git migration flags
+		EnableDualPathMode: getEnvBool("ENABLE_DUAL_PATH_MODE", false),
 	}
 
 	return cfg, nil
