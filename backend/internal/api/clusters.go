@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -28,7 +30,7 @@ func NewClusterHandlers(db *gorm.DB, clientManager k8s.ClientManager) *ClusterHa
 type CreateClusterRequest struct {
 	Name          string `json:"name" binding:"required"`
 	KubeconfigRef string `json:"kubeconfig_ref" binding:"required"`
-	Environment   string `json:"environment" binding:"required,oneof=dev staging prod"`
+	Environment   string `json:"environment" binding:"required,oneof=development staging production"`
 }
 
 // ListClusters returns all clusters with their health status
@@ -116,9 +118,20 @@ func (h *ClusterHandlers) CreateCluster(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate environment enum
-	if req.Environment != "dev" && req.Environment != "staging" && req.Environment != "prod" {
-		http.Error(w, "Invalid environment. Must be one of: dev, staging, prod", http.StatusBadRequest)
+	// Validate environment enum (must match models.Cluster enum)
+	validEnvironments := map[string]bool{
+		"development": true,
+		"staging":     true,
+		"production":  true,
+	}
+	if !validEnvironments[req.Environment] {
+		http.Error(w, "Invalid environment. Must be one of: development, staging, production", http.StatusBadRequest)
+		return
+	}
+
+	// Validate kubeconfig_ref format (prevent directory traversal)
+	if err := validateKubeconfigPath(req.KubeconfigRef); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid kubeconfig_ref: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -202,7 +215,7 @@ func (h *ClusterHandlers) DeleteCluster(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if namespaceCount > 0 {
-		http.Error(w, fmt.Sprintf("Cannot delete cluster: %d namespace(s) are associated with this cluster", namespaceCount), http.StatusConflict)
+		http.Error(w, "Cannot delete cluster with existing namespaces. Delete namespaces first.", http.StatusConflict)
 		return
 	}
 
@@ -313,4 +326,36 @@ func (h *ClusterHandlers) GetClusterHealth(w http.ResponseWriter, r *http.Reques
 		"cluster_id": clusterID,
 		"healthy":    isHealthy,
 	})
+}
+
+// validateKubeconfigPath validates the kubeconfig reference path
+// Prevents directory traversal attacks and ensures valid file paths
+func validateKubeconfigPath(path string) error {
+	// Check for empty path
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+
+	// Ensure path is relative (not absolute)
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("path must be relative, not absolute")
+	}
+
+	// Check for directory traversal attempts
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path contains directory traversal sequence")
+	}
+
+	// Ensure path is clean (no suspicious sequences)
+	cleanPath := filepath.Clean(path)
+	if cleanPath != path {
+		return fmt.Errorf("path contains suspicious sequences")
+	}
+
+	// Check for common malicious patterns
+	if strings.Contains(path, "\x00") {
+		return fmt.Errorf("path contains null byte")
+	}
+
+	return nil
 }
