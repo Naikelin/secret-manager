@@ -142,6 +142,10 @@ spec:
             configMapKeyRef:
               name: backend-config
               key: DRIFT_WEBHOOK_URL
+        # Multi-cluster kubeconfig support
+        # Points to directory containing per-cluster kubeconfig files (e.g., devops.yaml, integraciones-prod.yaml)
+        - name: K8S_KUBECONFIGS_DIR
+          value: /etc/kubeconfigs
         livenessProbe:
           httpGet:
             path: /api/health
@@ -171,6 +175,10 @@ spec:
         - name: sops-age-key
           mountPath: /secrets
           readOnly: true
+        # Multi-cluster kubeconfig files (mounted from Secret)
+        - name: kubeconfigs
+          mountPath: /etc/kubeconfigs
+          readOnly: true
       volumes:
       - name: git-data
         emptyDir: {}
@@ -181,6 +189,13 @@ spec:
           - key: SOPS_AGE_KEY
             path: sops-age-key
           optional: true
+      # Multi-cluster kubeconfig volume
+      # Create this Secret with: kubectl create secret generic kubeconfigs --from-file=devops.yaml --from-file=integraciones-prod.yaml ...
+      # Each file should be named <cluster-name>.yaml and contain a valid kubeconfig
+      - name: kubeconfigs
+        secret:
+          secretName: kubeconfigs
+          defaultMode: 0400  # Read-only for owner (secure permissions)
 ---
 apiVersion: v1
 kind: ServiceAccount
