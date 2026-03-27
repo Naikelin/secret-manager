@@ -68,6 +68,39 @@ jobs:
           go mod download
           go mod verify
 
+      # ============================================================
+      # Multi-Cluster Backend Tests
+      # ============================================================
+
+      - name: Run ClientManager unit tests
+        run: |
+          cd backend
+          go test -v -race ./internal/k8s/...
+        env:
+          CI: true
+
+      - name: Run ClientManager concurrency and security tests
+        run: |
+          cd backend
+          go test -v -race ./internal/k8s/... -run "Concurrent|Security|Load"
+        env:
+          CI: true
+
+      - name: Run multi-cluster integration tests
+        run: |
+          cd backend
+          go test -v ./tests/e2e/... ./tests/migration/...
+        env:
+          CI: true
+          DATABASE_URL: postgres://dev:devpass@postgres:5432/secretmanager?sslmode=disable
+
+      - name: Run ClientManager benchmarks
+        run: |
+          cd backend
+          go test -bench=. -benchmem ./internal/k8s/... -run=^$
+        env:
+          CI: true
+
       - name: Install frontend dependencies
         run: |
           cd frontend
