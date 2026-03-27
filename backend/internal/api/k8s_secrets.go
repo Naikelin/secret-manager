@@ -14,8 +14,8 @@ import (
 
 // K8sSecretHandlers contains handlers for K8s secret operations
 type K8sSecretHandlers struct {
-	db        *gorm.DB
-	k8sClient *k8s.K8sClient
+	db            *gorm.DB
+	clientManager k8s.ClientManager
 }
 
 // K8sSecretInfo represents a K8s secret metadata (without actual data values)
@@ -37,10 +37,10 @@ type K8sSecretsListResponse struct {
 }
 
 // NewK8sSecretHandlers creates new K8s secret handlers
-func NewK8sSecretHandlers(db *gorm.DB, k8sClient *k8s.K8sClient) *K8sSecretHandlers {
+func NewK8sSecretHandlers(db *gorm.DB, clientManager k8s.ClientManager) *K8sSecretHandlers {
 	return &K8sSecretHandlers{
-		db:        db,
-		k8sClient: k8sClient,
+		db:            db,
+		clientManager: clientManager,
 	}
 }
 
@@ -59,16 +59,10 @@ func NewK8sSecretHandlers(db *gorm.DB, k8sClient *k8s.K8sClient) *K8sSecretHandl
 // @Security BearerAuth
 // @Router /namespaces/{namespace}/k8s-secrets [get]
 func (h *K8sSecretHandlers) ListK8sSecrets(w http.ResponseWriter, r *http.Request) {
-	// Check if K8s client is available
-	if h.k8sClient == nil {
-		http.Error(w, `{"error":"Kubernetes cluster not available"}`, http.StatusServiceUnavailable)
-		return
-	}
-
 	// Get namespace ID from route params
 	namespaceIDStr := chi.URLParam(r, "namespace")
 
-	// Look up namespace by ID to get the actual K8s namespace name
+	// Look up namespace by ID to get the actual K8s namespace name and cluster
 	var namespace models.Namespace
 	if err := h.db.Where("id = ?", namespaceIDStr).First(&namespace).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -79,8 +73,21 @@ func (h *K8sSecretHandlers) ListK8sSecrets(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check if namespace has a cluster assigned
+	if namespace.ClusterID == nil {
+		http.Error(w, `{"error":"Namespace has no cluster assigned"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Get K8s client for the namespace's cluster
+	k8sClient, err := h.clientManager.GetClient(*namespace.ClusterID)
+	if err != nil {
+		http.Error(w, `{"error":"Kubernetes cluster not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
 	// List secrets from K8s
-	k8sSecrets, err := h.k8sClient.ListSecrets(namespace.Name)
+	k8sSecrets, err := k8sClient.ListSecrets(namespace.Name)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to list secrets from Kubernetes"}`, http.StatusInternalServerError)
 		return
@@ -127,17 +134,11 @@ func (h *K8sSecretHandlers) ListK8sSecrets(w http.ResponseWriter, r *http.Reques
 // @Security BearerAuth
 // @Router /namespaces/{namespace}/k8s-secrets/{name} [get]
 func (h *K8sSecretHandlers) GetK8sSecret(w http.ResponseWriter, r *http.Request) {
-	// Check if K8s client is available
-	if h.k8sClient == nil {
-		http.Error(w, `{"error":"Kubernetes cluster not available"}`, http.StatusServiceUnavailable)
-		return
-	}
-
 	// Get params from route
 	namespaceIDStr := chi.URLParam(r, "namespace")
 	secretName := chi.URLParam(r, "name")
 
-	// Look up namespace by ID
+	// Look up namespace by ID to get cluster
 	var namespace models.Namespace
 	if err := h.db.Where("id = ?", namespaceIDStr).First(&namespace).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -148,8 +149,21 @@ func (h *K8sSecretHandlers) GetK8sSecret(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Check if namespace has a cluster assigned
+	if namespace.ClusterID == nil {
+		http.Error(w, `{"error":"Namespace has no cluster assigned"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Get K8s client for the namespace's cluster
+	k8sClient, err := h.clientManager.GetClient(*namespace.ClusterID)
+	if err != nil {
+		http.Error(w, `{"error":"Kubernetes cluster not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
 	// Get secret from K8s
-	k8sSecret, err := h.k8sClient.GetSecret(namespace.Name, secretName)
+	k8sSecret, err := k8sClient.GetSecret(namespace.Name, secretName)
 	if err != nil {
 		http.Error(w, `{"error":"Secret not found in Kubernetes"}`, http.StatusNotFound)
 		return

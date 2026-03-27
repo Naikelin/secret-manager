@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/yourorg/secret-manager/internal/k8s"
 	"github.com/yourorg/secret-manager/internal/models"
@@ -18,6 +20,33 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// MockK8sClientManager is a mock implementation of k8s.ClientManager for testing
+type MockK8sClientManager struct {
+	mock.Mock
+}
+
+func (m *MockK8sClientManager) GetClient(clusterID uuid.UUID) (*k8s.K8sClient, error) {
+	args := m.Called(clusterID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*k8s.K8sClient), args.Error(1)
+}
+
+func (m *MockK8sClientManager) AddClient(clusterID uuid.UUID, kubeconfigPath string) error {
+	args := m.Called(clusterID, kubeconfigPath)
+	return args.Error(0)
+}
+
+func (m *MockK8sClientManager) RemoveClient(clusterID uuid.UUID) {
+	m.Called(clusterID)
+}
+
+func (m *MockK8sClientManager) HealthCheck(clusterID uuid.UUID) (bool, error) {
+	args := m.Called(clusterID)
+	return args.Bool(0), args.Error(1)
+}
 
 func setupK8sSecretsTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
@@ -30,6 +59,7 @@ func setupK8sSecretsTestDB(t *testing.T) *gorm.DB {
 		CREATE TABLE namespaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE,
+			cluster_id TEXT,
 			cluster TEXT NOT NULL,
 			environment TEXT NOT NULL CHECK (environment IN ('dev', 'staging', 'prod')),
 			created_at DATETIME
@@ -60,16 +90,24 @@ func setupK8sSecretsTestDB(t *testing.T) *gorm.DB {
 func TestListK8sSecrets_K8sUnavailable(t *testing.T) {
 	db := setupK8sSecretsTestDB(t)
 
-	// Create test namespace
+	// Create test cluster
+	clusterID := uuid.New()
+
+	// Create test namespace with cluster assigned
 	namespace := models.Namespace{
 		ID:          uuid.New(),
 		Name:        "default",
+		ClusterID:   &clusterID,
 		Cluster:     "test-cluster",
 		Environment: "dev",
 	}
 	require.NoError(t, db.Create(&namespace).Error)
 
-	handlers := NewK8sSecretHandlers(db, nil) // K8s client is nil
+	// Mock ClientManager that returns error
+	mockManager := new(MockK8sClientManager)
+	mockManager.On("GetClient", clusterID).Return(nil, errors.New("cluster not available"))
+
+	handlers := NewK8sSecretHandlers(db, mockManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/k8s-secrets", nil)
 
@@ -83,12 +121,14 @@ func TestListK8sSecrets_K8sUnavailable(t *testing.T) {
 
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Kubernetes cluster not available")
+	mockManager.AssertExpectations(t)
 }
 
 func TestListK8sSecrets_NamespaceNotFound(t *testing.T) {
 	db := setupK8sSecretsTestDB(t)
 
-	handlers := NewK8sSecretHandlers(db, &k8s.K8sClient{})
+	mockManager := new(MockK8sClientManager)
+	handlers := NewK8sSecretHandlers(db, mockManager)
 
 	// Use non-existent namespace ID
 	nonExistentID := uuid.New()
@@ -110,16 +150,24 @@ func TestListK8sSecrets_NamespaceNotFound(t *testing.T) {
 func TestGetK8sSecret_K8sUnavailable(t *testing.T) {
 	db := setupK8sSecretsTestDB(t)
 
-	// Create test namespace
+	// Create test cluster
+	clusterID := uuid.New()
+
+	// Create test namespace with cluster assigned
 	namespace := models.Namespace{
 		ID:          uuid.New(),
 		Name:        "default",
+		ClusterID:   &clusterID,
 		Cluster:     "test-cluster",
 		Environment: "dev",
 	}
 	require.NoError(t, db.Create(&namespace).Error)
 
-	handlers := NewK8sSecretHandlers(db, nil) // K8s client is nil
+	// Mock ClientManager that returns error
+	mockManager := new(MockK8sClientManager)
+	mockManager.On("GetClient", clusterID).Return(nil, errors.New("cluster not available"))
+
+	handlers := NewK8sSecretHandlers(db, mockManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/k8s-secrets/test-secret", nil)
 

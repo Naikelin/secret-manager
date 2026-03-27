@@ -93,7 +93,7 @@ func main() {
 
 	// Initialize drift detector for background job
 	var driftDetector *drift.DriftDetector
-	k8sClient, gitClient, sopsClient := initClientsForDrift(cfg)
+	gitClient, sopsClient := initClientsForDrift(cfg)
 
 	// Initialize ClientManager for multi-cluster support
 	clientManager := k8s.NewClientManager(cfg.KubeconfigsDir, db)
@@ -119,9 +119,9 @@ func main() {
 			logger.Info("Webhook notifications enabled for drift detection", "url", webhookURL)
 		}
 
-		// Initialize FluxClient if K8s client is available
+		// Initialize FluxClient if ClientManager is available
 		var fluxClient *flux.FluxClient
-		if k8sClient != nil {
+		if clientManager != nil {
 			fluxClient, err = flux.NewFluxClient(cfg.K8sKubeconfig)
 			if err != nil {
 				logger.Warn("Failed to initialize Flux client", "error", err)
@@ -189,17 +189,11 @@ func main() {
 	logger.Info("Server exited")
 }
 
-// initClientsForDrift initializes K8s, Git, and SOPS clients for drift detection
-func initClientsForDrift(cfg *config.Config) (*k8s.K8sClient, *git.GitClient, *sops.SOPSClient) {
-	// Initialize K8s client
-	k8sClient, err := k8s.NewK8sClient(cfg.K8sKubeconfig)
-	if err != nil {
-		logger.Warn("Failed to initialize K8s client for drift detection", "error", err)
-		k8sClient = nil
-	}
-
+// initClientsForDrift initializes Git and SOPS clients for drift detection
+func initClientsForDrift(cfg *config.Config) (*git.GitClient, *sops.SOPSClient) {
 	// Initialize Git client
 	var gitClient *git.GitClient
+	var err error
 	if cfg.GitRepoURL != "" {
 		var auth transport.AuthMethod
 		if cfg.GitAuthType == "ssh" {
@@ -230,7 +224,7 @@ func initClientsForDrift(cfg *config.Config) (*k8s.K8sClient, *git.GitClient, *s
 		}
 	}
 
-	return k8sClient, gitClient, sopsClient
+	return gitClient, sopsClient
 }
 
 // startDriftDetectionJob runs drift detection periodically for all namespaces

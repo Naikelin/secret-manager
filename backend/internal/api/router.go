@@ -91,14 +91,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config, clientManager k8s.ClientManager)
 
 	syncHandlers := NewSyncHandlers(db, fluxClient, gitClient, cfg.FluxKustomizationName, cfg.FluxGitRepositoryName, cfg.FluxKustomizationNS)
 
-	// Initialize K8s client for K8s secret handlers
-	k8sClient, err := initK8sClient(cfg)
-	if err != nil {
-		// Log error but don't fail - K8s operations will report cluster as unavailable
-		// logger.Warn("Failed to initialize K8s client", "error", err)
-	}
-
-	k8sSecretHandlers := NewK8sSecretHandlers(db, k8sClient)
+	// Initialize K8s secret handlers with ClientManager
+	k8sSecretHandlers := NewK8sSecretHandlers(db, clientManager)
 
 	// Initialize drift detector for drift handlers
 	var driftDetector *drift.DriftDetector
@@ -110,17 +104,15 @@ func NewRouter(db *gorm.DB, cfg *config.Config, clientManager k8s.ClientManager)
 			fmt.Printf("[INIT] Webhook notifications enabled for drift detection\n")
 		}
 
-		// Initialize FluxClient
+		// Initialize FluxClient for drift detection
 		var fluxClient *flux.FluxClient
 		var err error
-		if k8sClient != nil {
-			fluxClient, err = flux.NewFluxClient(cfg.K8sKubeconfig)
-			if err != nil {
-				fmt.Printf("[WARN] Failed to initialize Flux client: %v\n", err)
-				fluxClient = nil
-			} else {
-				fmt.Printf("[INIT] Flux client initialized successfully\n")
-			}
+		fluxClient, err = flux.NewFluxClient(cfg.K8sKubeconfig)
+		if err != nil {
+			fmt.Printf("[WARN] Failed to initialize Flux client: %v\n", err)
+			fluxClient = nil
+		} else {
+			fmt.Printf("[INIT] Flux client initialized successfully\n")
 		}
 
 		// Wrap clientManager to satisfy drift detector interface
@@ -312,16 +304,6 @@ func initFluxClient(cfg *config.Config) (FluxClientInterface, error) {
 	}
 
 	return fluxClient, nil
-}
-
-// initK8sClient initializes the Kubernetes client from config
-func initK8sClient(cfg *config.Config) (*k8s.K8sClient, error) {
-	k8sClient, err := k8s.NewK8sClient(cfg.K8sKubeconfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create K8s client: %w", err)
-	}
-
-	return k8sClient, nil
 }
 
 // initGitSyncer initializes the Git syncer for secret handlers
