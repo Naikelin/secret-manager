@@ -34,6 +34,32 @@ backend:
   logLevel: info
   authProvider: azure  # mock, azure, or oidc
   
+  # Multi-cluster kubeconfig configuration
+  kubeconfigs:
+    # Directory where kubeconfig files are mounted
+    dir: /etc/kubeconfigs
+    
+    # Secret containing kubeconfig files
+    # Each file should be named: cluster-name.yaml
+    # Example: devops.yaml, integraciones-dev.yaml, integraciones-stg.yaml
+    secretName: kubeconfigs
+    
+    # List of clusters (for documentation and validation)
+    # Each kubeconfig file in the secret should match one of these cluster names
+    clusters:
+      - name: devops
+        environment: production
+      - name: integraciones-dev
+        environment: development
+      - name: integraciones-stg
+        environment: staging
+      - name: integraciones-pro
+        environment: production
+      - name: kyndryl-dev-stg
+        environment: staging
+      - name: kyndryl-pro
+        environment: production
+  
   # Git configuration for drift detection
   git:
     repoPath: /data/secrets-repo

@@ -100,6 +100,11 @@ spec:
           mountPath: /secrets
           readOnly: true
         {{- end }}
+        {{- if .Values.backend.kubeconfigs.secretName }}
+        - name: kubeconfigs
+          mountPath: {{ .Values.backend.kubeconfigs.dir }}
+          readOnly: true
+        {{- end }}
       volumes:
       - name: git-data
         emptyDir: {}
@@ -110,6 +115,11 @@ spec:
           items:
           - key: SOPS_AGE_KEY
             path: sops-age-key
+      {{- end }}
+      {{- if .Values.backend.kubeconfigs.secretName }}
+      - name: kubeconfigs
+        secret:
+          secretName: {{ .Values.backend.kubeconfigs.secretName }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

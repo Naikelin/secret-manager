@@ -20,6 +20,18 @@ backend:
   logLevel: warn
   authProvider: azure
   
+  # Multi-cluster kubeconfig configuration
+  kubeconfigs:
+    secretName: kubeconfigs
+    # The secret should contain files named after each cluster:
+    # kubectl create secret generic kubeconfigs \
+    #   --from-file=devops=/path/to/devops.yaml \
+    #   --from-file=integraciones-dev=/path/to/integraciones-dev.yaml \
+    #   --from-file=integraciones-stg=/path/to/integraciones-stg.yaml \
+    #   --from-file=integraciones-pro=/path/to/integraciones-pro.yaml \
+    #   --from-file=kyndryl-dev-stg=/path/to/kyndryl-dev-stg.yaml \
+    #   --from-file=kyndryl-pro=/path/to/kyndryl-pro.yaml
+  
   git:
     repoUrl: https://github.com/yourorg/secrets-repo.git
     # token: "" # Set via --set backend.git.token=xxx or sealed-secrets
