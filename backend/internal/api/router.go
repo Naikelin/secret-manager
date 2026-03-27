@@ -80,7 +80,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config, clientManager k8s.ClientManager)
 	}
 
 	secretHandlers := NewSecretHandlers(db, gitSyncer)
-	publishHandlers := NewPublishHandlers(db, gitClient, sopsClient)
+	publishHandlers := NewPublishHandlers(db, gitClient, sopsClient, clientManager)
 
 	// Initialize FluxCD client for sync handlers
 	fluxClient, err := initFluxClient(cfg)

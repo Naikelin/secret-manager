@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/yourorg/secret-manager/internal/k8s"
 	"github.com/yourorg/secret-manager/internal/middleware"
 	"github.com/yourorg/secret-manager/internal/models"
 	"github.com/yourorg/secret-manager/pkg/logger"
@@ -41,17 +42,19 @@ type SOPSClientInterface interface {
 
 // PublishHandlers contains handlers for publish/unpublish operations
 type PublishHandlers struct {
-	db         *gorm.DB
-	gitClient  GitClientInterface
-	sopsClient SOPSClientInterface
+	db            *gorm.DB
+	gitClient     GitClientInterface
+	sopsClient    SOPSClientInterface
+	clientManager k8s.ClientManager
 }
 
 // NewPublishHandlers creates a new PublishHandlers instance
-func NewPublishHandlers(db *gorm.DB, gitClient GitClientInterface, sopsClient SOPSClientInterface) *PublishHandlers {
+func NewPublishHandlers(db *gorm.DB, gitClient GitClientInterface, sopsClient SOPSClientInterface, clientManager k8s.ClientManager) *PublishHandlers {
 	return &PublishHandlers{
-		db:         db,
-		gitClient:  gitClient,
-		sopsClient: sopsClient,
+		db:            db,
+		gitClient:     gitClient,
+		sopsClient:    sopsClient,
+		clientManager: clientManager,
 	}
 }
 
