@@ -27,7 +27,7 @@ export function SecretForm({ namespaceId, secret, mode }: SecretFormProps) {
 
   useEffect(() => {
     loadNamespaces();
-  }, []);
+  }, [secret]);
 
   useEffect(() => {
     // Auto-select namespace ONLY if namespaceId prop was provided (from URL or edit mode)

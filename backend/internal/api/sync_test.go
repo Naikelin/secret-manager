@@ -23,6 +23,7 @@ import (
 type MockFluxClient struct {
 	GetKustomizationStatusFunc func(name, namespace string) (*flux.KustomizationStatus, error)
 	ListKustomizationsFunc     func(namespace string) ([]flux.KustomizationStatus, error)
+	GetGitRepositoryStatusFunc func(name, namespace string) (*flux.GitRepositoryStatus, error)
 }
 
 func (m *MockFluxClient) GetKustomizationStatus(name, namespace string) (*flux.KustomizationStatus, error) {
@@ -35,6 +36,13 @@ func (m *MockFluxClient) GetKustomizationStatus(name, namespace string) (*flux.K
 func (m *MockFluxClient) ListKustomizations(namespace string) ([]flux.KustomizationStatus, error) {
 	if m.ListKustomizationsFunc != nil {
 		return m.ListKustomizationsFunc(namespace)
+	}
+	return nil, nil
+}
+
+func (m *MockFluxClient) GetGitRepositoryStatus(name, namespace string) (*flux.GitRepositoryStatus, error) {
+	if m.GetGitRepositoryStatusFunc != nil {
+		return m.GetGitRepositoryStatusFunc(name, namespace)
 	}
 	return nil, nil
 }
@@ -125,17 +133,19 @@ func TestGetSyncStatus_Success(t *testing.T) {
 				Message:           "Applied revision: main@sha1:abc123",
 			}, nil
 		},
-	}
-
-	// Mock Git client
-	mockGit := &MockGitClient{
-		GetCurrentSHAFunc: func() (string, error) {
-			return "abc123", nil
+		GetGitRepositoryStatusFunc: func(name, namespace string) (*flux.GitRepositoryStatus, error) {
+			return &flux.GitRepositoryStatus{
+				Name:              "secrets-repo",
+				Namespace:         "flux-system",
+				Ready:             true,
+				LastFetchedCommit: "abc123",
+				LastFetchTime:     time.Date(2026, 3, 22, 10, 29, 0, 0, time.UTC),
+			}, nil
 		},
 	}
 
 	// Create handler
-	handler := NewSyncHandlers(db, mockFlux, mockGit)
+	handler := NewSyncHandlers(db, mockFlux, nil, "secrets", "secrets-repo", "flux-system")
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/sync-status", nil)
@@ -191,15 +201,8 @@ func TestGetSyncStatus_NamespaceNotFound(t *testing.T) {
 	// Mock FluxCD client (won't be called)
 	mockFlux := &MockFluxClient{}
 
-	// Mock Git client
-	mockGit := &MockGitClient{
-		GetCurrentSHAFunc: func() (string, error) {
-			return "abc123", nil
-		},
-	}
-
 	// Create handler
-	handler := NewSyncHandlers(db, mockFlux, mockGit)
+	handler := NewSyncHandlers(db, mockFlux, nil, "secrets", "secrets-repo", "flux-system")
 
 	// Create request with non-existent namespace
 	randomID := uuid.New()
@@ -224,12 +227,7 @@ func TestGetSyncStatus_NamespaceNotFound(t *testing.T) {
 func TestGetSyncStatus_InvalidNamespaceID(t *testing.T) {
 	db := setupSyncTestDB(t)
 	mockFlux := &MockFluxClient{}
-	mockGit := &MockGitClient{
-		GetCurrentSHAFunc: func() (string, error) {
-			return "abc123", nil
-		},
-	}
-	handler := NewSyncHandlers(db, mockFlux, mockGit)
+	handler := NewSyncHandlers(db, mockFlux, nil, "secrets", "secrets-repo", "flux-system")
 
 	// Create request with invalid UUID
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/invalid-uuid/sync-status", nil)
@@ -263,7 +261,7 @@ func TestGetSyncStatus_FluxNotAvailable(t *testing.T) {
 	require.NoError(t, db.Create(&namespace).Error)
 
 	// Create handler with nil FluxCD client
-	handler := NewSyncHandlers(db, nil, nil)
+	handler := NewSyncHandlers(db, nil, nil, "secrets", "secrets-repo", "flux-system")
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/sync-status", nil)
@@ -324,17 +322,18 @@ func TestGetSyncStatus_NoPublishedSecrets(t *testing.T) {
 				Ready:     true,
 			}, nil
 		},
-	}
-
-	// Mock Git client
-	mockGit := &MockGitClient{
-		GetCurrentSHAFunc: func() (string, error) {
-			return "abc123", nil
+		GetGitRepositoryStatusFunc: func(name, namespace string) (*flux.GitRepositoryStatus, error) {
+			return &flux.GitRepositoryStatus{
+				Name:              "secrets-repo",
+				Namespace:         "flux-system",
+				Ready:             true,
+				LastFetchedCommit: "abc123",
+			}, nil
 		},
 	}
 
 	// Create handler
-	handler := NewSyncHandlers(db, mockFlux, mockGit)
+	handler := NewSyncHandlers(db, mockFlux, nil, "secrets", "secrets-repo", "flux-system")
 
 	// Create request
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/namespaces/"+namespace.ID.String()+"/sync-status", nil)

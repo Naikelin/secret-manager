@@ -89,7 +89,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) http.Handler {
 		// logger.Warn("Failed to initialize FluxCD client", "error", err)
 	}
 
-	syncHandlers := NewSyncHandlers(db, fluxClient, gitClient)
+	syncHandlers := NewSyncHandlers(db, fluxClient, gitClient, cfg.FluxKustomizationName, cfg.FluxGitRepositoryName, cfg.FluxKustomizationNS)
 
 	// Initialize K8s client for K8s secret handlers
 	k8sClient, err := initK8sClient(cfg)

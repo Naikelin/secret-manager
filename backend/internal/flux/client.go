@@ -32,6 +32,16 @@ type KustomizationStatus struct {
 	Message           string    `json:"message,omitempty"`
 }
 
+// GitRepositoryStatus represents the status of a FluxCD GitRepository
+type GitRepositoryStatus struct {
+	Name              string    `json:"name"`
+	Namespace         string    `json:"namespace"`
+	Ready             bool      `json:"ready"`
+	LastFetchedCommit string    `json:"last_fetched_commit"`
+	LastFetchTime     time.Time `json:"last_fetch_time"`
+	Message           string    `json:"message,omitempty"`
+}
+
 // NewFluxClient creates a new FluxClient
 // If kubeconfig is empty, it uses in-cluster configuration
 func NewFluxClient(kubeconfig string) (*FluxClient, error) {
@@ -81,6 +91,28 @@ func (c *FluxClient) GetKustomizationStatus(name, namespace string) (*Kustomizat
 	}
 
 	return parseKustomizationStatus(result)
+}
+
+// GetGitRepositoryStatus retrieves the status of a specific GitRepository
+func (c *FluxClient) GetGitRepositoryStatus(name, namespace string) (*GitRepositoryStatus, error) {
+	if namespace == "" {
+		namespace = c.namespace
+	}
+
+	// Define the GitRepository GVR (GroupVersionResource)
+	gvr := schema.GroupVersionResource{
+		Group:    "source.toolkit.fluxcd.io",
+		Version:  "v1",
+		Resource: "gitrepositories",
+	}
+
+	ctx := context.Background()
+	result, err := c.dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gitrepository %s: %w", name, err)
+	}
+
+	return parseGitRepositoryStatus(result)
 }
 
 // ListKustomizations retrieves all Kustomizations in a namespace
@@ -157,6 +189,54 @@ func parseKustomizationStatus(obj *unstructured.Unstructured) (*KustomizationSta
 						status.LastSyncTime = t
 					}
 				}
+			}
+		}
+	}
+
+	return status, nil
+}
+
+// parseGitRepositoryStatus extracts status information from an unstructured GitRepository object
+func parseGitRepositoryStatus(obj *unstructured.Unstructured) (*GitRepositoryStatus, error) {
+	status := &GitRepositoryStatus{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+	}
+
+	// Extract status fields
+	statusMap, found, err := unstructured.NestedMap(obj.Object, "status")
+	if err != nil || !found {
+		return status, nil // No status yet, return empty status
+	}
+
+	// Extract artifact.revision (commit SHA)
+	if artifactRevision, found, _ := unstructured.NestedString(statusMap, "artifact", "revision"); found {
+		status.LastFetchedCommit = extractCommitSHA(artifactRevision)
+	}
+
+	// Extract artifact.lastUpdateTime
+	if lastUpdateTime, found, _ := unstructured.NestedString(statusMap, "artifact", "lastUpdateTime"); found {
+		if t, err := time.Parse(time.RFC3339, lastUpdateTime); err == nil {
+			status.LastFetchTime = t
+		}
+	}
+
+	// Extract conditions to determine readiness
+	conditions, found, err := unstructured.NestedSlice(statusMap, "conditions")
+	if err == nil && found {
+		for _, condition := range conditions {
+			condMap, ok := condition.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			condType, _, _ := unstructured.NestedString(condMap, "type")
+			condStatus, _, _ := unstructured.NestedString(condMap, "status")
+			condMessage, _, _ := unstructured.NestedString(condMap, "message")
+
+			if condType == "Ready" {
+				status.Ready = (condStatus == "True")
+				status.Message = condMessage
 			}
 		}
 	}

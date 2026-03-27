@@ -164,27 +164,6 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <DriftWidget />
         </div>
-
-        {/* Status Info */}
-        <div className="mt-8 bg-white rounded-xl shadow-md p-6 border border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">System Status</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 rounded-full bg-green-500 shadow-lg shadow-green-500/50"></div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Authentication</p>
-                <p className="text-xs text-gray-500">Active (Mock Provider)</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 rounded-full bg-gray-400"></div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">FluxCD</p>
-                <p className="text-xs text-gray-500">Not configured</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </main>
     </div>
   );

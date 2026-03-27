@@ -16,21 +16,28 @@ import (
 type FluxClientInterface interface {
 	GetKustomizationStatus(name, namespace string) (*flux.KustomizationStatus, error)
 	ListKustomizations(namespace string) ([]flux.KustomizationStatus, error)
+	GetGitRepositoryStatus(name, namespace string) (*flux.GitRepositoryStatus, error)
 }
 
 // SyncHandlers handles FluxCD sync status endpoints
 type SyncHandlers struct {
-	db         *gorm.DB
-	fluxClient FluxClientInterface
-	gitClient  GitClientInterface
+	db                         *gorm.DB
+	fluxClient                 FluxClientInterface
+	gitClient                  GitClientInterface
+	fluxKustomizationName      string
+	fluxGitRepositoryName      string
+	fluxGitRepositoryNamespace string
 }
 
 // NewSyncHandlers creates a new SyncHandlers instance
-func NewSyncHandlers(db *gorm.DB, fluxClient FluxClientInterface, gitClient GitClientInterface) *SyncHandlers {
+func NewSyncHandlers(db *gorm.DB, fluxClient FluxClientInterface, gitClient GitClientInterface, fluxKustomizationName, fluxGitRepositoryName, fluxGitRepositoryNamespace string) *SyncHandlers {
 	return &SyncHandlers{
-		db:         db,
-		fluxClient: fluxClient,
-		gitClient:  gitClient,
+		db:                         db,
+		fluxClient:                 fluxClient,
+		gitClient:                  gitClient,
+		fluxKustomizationName:      fluxKustomizationName,
+		fluxGitRepositoryName:      fluxGitRepositoryName,
+		fluxGitRepositoryNamespace: fluxGitRepositoryNamespace,
 	}
 }
 
@@ -101,20 +108,20 @@ func (h *SyncHandlers) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 		Secrets:   []SecretSyncInfo{},
 	}
 
-	// Get Git commit SHA if Git client is available
+	// Get Git commit SHA from FluxCD GitRepository if client is available
 	var gitCommit string
 	var gitError *string
-	if h.gitClient != nil {
-		sha, err := h.gitClient.GetCurrentSHA()
+	if h.fluxClient != nil {
+		gitRepoStatus, err := h.fluxClient.GetGitRepositoryStatus(h.fluxGitRepositoryName, h.fluxGitRepositoryNamespace)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to get Git commit: %v", err)
+			errMsg := fmt.Sprintf("Failed to get GitRepository status: %v", err)
 			gitError = &errMsg
-		} else {
-			gitCommit = sha
+		} else if gitRepoStatus != nil {
+			gitCommit = gitRepoStatus.LastFetchedCommit
 		}
 	} else {
-		// Git not configured
-		errMsg := "Git not configured"
+		// FluxCD not configured
+		errMsg := "FluxCD not configured"
 		gitError = &errMsg
 	}
 	response.GitCommit = gitCommit
@@ -122,7 +129,8 @@ func (h *SyncHandlers) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Query FluxCD if client is available
 	if h.fluxClient != nil {
-		kustomizationName := fmt.Sprintf("secrets-%s", namespace.Name)
+		// Use configured Kustomization name (single Kustomization manages all namespaces)
+		kustomizationName := h.fluxKustomizationName
 		fluxStatus, err := h.fluxClient.GetKustomizationStatus(kustomizationName, "flux-system")
 		if err == nil {
 			response.FluxReady = fluxStatus.Ready
