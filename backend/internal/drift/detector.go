@@ -52,10 +52,35 @@ type FluxClientInterface interface {
 	GetKustomizationStatus(name, namespace string) (*flux.KustomizationStatus, error)
 }
 
+// ClientManagerInterface defines the operations for managing per-cluster K8s clients
+type ClientManagerInterface interface {
+	GetClient(clusterID uuid.UUID) (K8sClientInterface, error)
+	HealthCheck(clusterID uuid.UUID) (bool, error)
+}
+
+// clientManagerAdapter adapts k8s.ClientManager to ClientManagerInterface
+type clientManagerAdapter struct {
+	inner k8s.ClientManager
+}
+
+func (a *clientManagerAdapter) GetClient(clusterID uuid.UUID) (K8sClientInterface, error) {
+	return a.inner.GetClient(clusterID)
+}
+
+func (a *clientManagerAdapter) HealthCheck(clusterID uuid.UUID) (bool, error) {
+	return a.inner.HealthCheck(clusterID)
+}
+
+// WrapClientManager wraps a k8s.ClientManager to satisfy ClientManagerInterface
+func WrapClientManager(cm k8s.ClientManager) ClientManagerInterface {
+	return &clientManagerAdapter{inner: cm}
+}
+
 // DriftDetector detects drift between Git (source of truth) and Kubernetes (actual state)
 type DriftDetector struct {
 	db            *gorm.DB
-	k8sClient     K8sClientInterface
+	k8sClient     K8sClientInterface // Deprecated: kept for backward compatibility
+	clientManager ClientManagerInterface
 	gitClient     GitClientInterface
 	sopsClient    SOPSClientInterface
 	webhookClient *notifications.WebhookClient
@@ -64,7 +89,23 @@ type DriftDetector struct {
 }
 
 // NewDriftDetector creates a new DriftDetector instance
-func NewDriftDetector(db *gorm.DB, k8sClient K8sClientInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface, webhookClient *notifications.WebhookClient, fluxClient FluxClientInterface, cfg *config.Config) *DriftDetector {
+// clientManager: per-cluster K8s client pool (required for multi-cluster)
+// k8sClient: deprecated single client (kept for backward compatibility)
+func NewDriftDetector(db *gorm.DB, clientManager ClientManagerInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface, webhookClient *notifications.WebhookClient, fluxClient FluxClientInterface, cfg *config.Config) *DriftDetector {
+	return &DriftDetector{
+		db:            db,
+		clientManager: clientManager,
+		gitClient:     gitClient,
+		sopsClient:    sopsClient,
+		webhookClient: webhookClient,
+		fluxClient:    fluxClient,
+		cfg:           cfg,
+	}
+}
+
+// NewDriftDetectorWithSingleClient creates a DriftDetector with a single K8s client (backward compatibility)
+// Deprecated: Use NewDriftDetector with ClientManager for multi-cluster support
+func NewDriftDetectorWithSingleClient(db *gorm.DB, k8sClient K8sClientInterface, gitClient GitClientInterface, sopsClient SOPSClientInterface, webhookClient *notifications.WebhookClient, fluxClient FluxClientInterface, cfg *config.Config) *DriftDetector {
 	return &DriftDetector{
 		db:            db,
 		k8sClient:     k8sClient,
@@ -119,6 +160,106 @@ func (d *DriftDetector) DetectDriftForNamespace(namespaceID uuid.UUID) ([]models
 	return driftEvents, nil
 }
 
+// DetectDriftForAllClusters checks drift across all clusters with per-cluster error isolation
+// This is the primary entry point for the drift detection scheduler
+func (d *DriftDetector) DetectDriftForAllClusters() (map[uuid.UUID][]models.DriftEvent, error) {
+	if d.clientManager == nil {
+		return nil, fmt.Errorf("clientManager not initialized - cannot perform multi-cluster drift detection")
+	}
+
+	logger.Info("Starting multi-cluster drift detection")
+
+	// Load all clusters from database
+	var clusters []models.Cluster
+	if err := d.db.Find(&clusters).Error; err != nil {
+		return nil, fmt.Errorf("failed to load clusters: %w", err)
+	}
+
+	logger.Info("Found clusters for drift detection", "count", len(clusters))
+
+	// Ensure Git repository is up to date (once for all clusters)
+	if d.gitClient != nil {
+		if err := d.gitClient.EnsureRepo(); err != nil {
+			return nil, fmt.Errorf("failed to sync Git repository: %w", err)
+		}
+	}
+
+	// Results map: clusterID -> drift events
+	allDriftEvents := make(map[uuid.UUID][]models.DriftEvent)
+
+	// Iterate clusters with error isolation
+	for _, cluster := range clusters {
+		logger.Info("Processing cluster for drift detection", "cluster", cluster.Name, "cluster_id", cluster.ID)
+
+		// Get K8s client for this cluster
+		k8sClient, err := d.clientManager.GetClient(cluster.ID)
+		if err != nil {
+			logger.Error("Cluster unreachable - skipping drift detection", "cluster", cluster.Name, "cluster_id", cluster.ID, "error", err)
+			// Mark cluster as unhealthy (already done in ClientManager)
+			continue // Skip this cluster, continue with others
+		}
+
+		// Cluster client initialized successfully
+		logger.Info("Cluster client initialized successfully", "cluster", cluster.Name)
+
+		// Get all namespaces for this cluster
+		var namespaces []models.Namespace
+		if err := d.db.Where("cluster_id = ?", cluster.ID).Find(&namespaces).Error; err != nil {
+			logger.Error("Failed to load namespaces for cluster", "cluster", cluster.Name, "error", err)
+			continue // Skip this cluster
+		}
+
+		logger.Info("Found namespaces in cluster", "cluster", cluster.Name, "count", len(namespaces))
+
+		// Track drift events for this cluster
+		var clusterDriftEvents []models.DriftEvent
+
+		// Iterate namespaces in this cluster
+		for _, namespace := range namespaces {
+			// Get all published secrets in namespace
+			var secrets []models.SecretDraft
+			if err := d.db.Where("namespace_id = ? AND status = ?", namespace.ID, "published").Find(&secrets).Error; err != nil {
+				logger.Error("Failed to query secrets in namespace", "cluster", cluster.Name, "namespace", namespace.Name, "error", err)
+				continue // Skip this namespace
+			}
+
+			logger.Info("Checking secrets for drift", "cluster", cluster.Name, "namespace", namespace.Name, "secret_count", len(secrets))
+
+			// Check each secret for drift
+			for _, secret := range secrets {
+				event, err := d.detectDriftForSecretWithClient(k8sClient, &secret, &namespace, cluster.Name)
+				if err != nil {
+					logger.Error("Drift detection failed for secret", "cluster", cluster.Name, "namespace", namespace.Name, "secret", secret.SecretName, "error", err)
+					continue // Skip this secret
+				}
+
+				if event != nil {
+					clusterDriftEvents = append(clusterDriftEvents, *event)
+
+					// Update secret status to "drifted"
+					if err := d.db.Model(&secret).Update("status", "drifted").Error; err != nil {
+						logger.Error("Failed to update secret status to drifted", "cluster", cluster.Name, "namespace", namespace.Name, "secret", secret.SecretName, "error", err)
+					}
+
+					logger.Info("Drift detected", "cluster", cluster.Name, "namespace", namespace.Name, "secret", secret.SecretName, "drift_event_id", event.ID)
+				}
+			}
+		}
+
+		// Store cluster drift events
+		if len(clusterDriftEvents) > 0 {
+			allDriftEvents[cluster.ID] = clusterDriftEvents
+			logger.Info("Drift detection complete for cluster", "cluster", cluster.Name, "drift_count", len(clusterDriftEvents))
+		} else {
+			logger.Info("No drift detected in cluster", "cluster", cluster.Name)
+		}
+	}
+
+	logger.Info("Multi-cluster drift detection complete", "total_clusters", len(clusters), "clusters_with_drift", len(allDriftEvents))
+
+	return allDriftEvents, nil
+}
+
 // DetectDriftForSecret checks a single secret for drift
 func (d *DriftDetector) DetectDriftForSecret(secretID uuid.UUID) (*models.DriftEvent, error) {
 	// Load secret from DB
@@ -143,11 +284,24 @@ func (d *DriftDetector) DetectDriftForSecret(secretID uuid.UUID) (*models.DriftE
 		return nil, fmt.Errorf("namespace has no cluster association")
 	}
 
-	// Check for drift
-	return d.compareDrift(&secret, &namespace)
+	// Get K8s client for this cluster
+	if d.clientManager != nil {
+		k8sClient, err := d.clientManager.GetClient(*namespace.ClusterID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get K8s client for cluster %s: %w", namespace.ClusterRef.Name, err)
+		}
+		return d.detectDriftForSecretWithClient(k8sClient, &secret, &namespace, namespace.ClusterRef.Name)
+	}
+
+	// Backward compatibility: use old single k8sClient if clientManager not available
+	if d.k8sClient != nil {
+		return d.compareDrift(&secret, &namespace)
+	}
+
+	return nil, fmt.Errorf("neither clientManager nor k8sClient available")
 }
 
-// compareDrift performs the actual drift comparison
+// compareDrift performs the actual drift comparison (backward compatibility - uses single k8sClient)
 func (d *DriftDetector) compareDrift(secret *models.SecretDraft, namespace *models.Namespace) (*models.DriftEvent, error) {
 	// 1. Decrypt secret from Git using SOPS
 	var encryptedYAML []byte
@@ -201,8 +355,165 @@ func (d *DriftDetector) compareDrift(secret *models.SecretDraft, namespace *mode
 
 	gitData := k8s.NormalizeSecretData(k8sSecretYAML)
 
-	// 2. Get secret from Kubernetes
+	// 2. Get secret from Kubernetes (use deprecated single client)
 	k8sSecret, err := d.k8sClient.GetSecret(namespace.Name, secret.SecretName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Secret missing from Kubernetes cluster
+			gitVersion := map[string]interface{}{
+				"keys": getMapKeys(gitData),
+			}
+			k8sVersion := map[string]interface{}{
+				"status": "not_found",
+			}
+
+			event := &models.DriftEvent{
+				SecretName:  secret.SecretName,
+				NamespaceID: secret.NamespaceID,
+				DetectedAt:  time.Now(),
+				GitVersion:  mustMarshalJSON(gitVersion),
+				K8sVersion:  mustMarshalJSON(k8sVersion),
+				Diff:        mustMarshalJSON(map[string]string{"error": "Secret missing from Kubernetes cluster"}),
+			}
+
+			// Save drift event to database
+			if err := d.db.Create(event).Error; err != nil {
+				return nil, fmt.Errorf("failed to save drift event: %w", err)
+			}
+
+			// Send webhook notification
+			if d.webhookClient != nil {
+				notification := notifications.DriftNotification{
+					Namespace:  namespace.Name,
+					SecretName: secret.SecretName,
+					DriftType:  "missing_from_k8s",
+					DetectedAt: event.DetectedAt,
+					Message:    fmt.Sprintf("⚠️ Drift detected: %s/%s - Secret missing from Kubernetes cluster", namespace.Name, secret.SecretName),
+				}
+
+				if err := d.webhookClient.SendDriftNotification(notification); err != nil {
+					logger.Error("Failed to send webhook notification", "error", err)
+					// Don't fail drift detection if webhook fails
+				}
+			}
+
+			return event, nil
+		}
+		return nil, fmt.Errorf("failed to get secret from Kubernetes: %w", err)
+	}
+
+	// 3. Compare data
+	k8sData := k8s.NormalizeSecretData(k8sSecret)
+	if !k8s.CompareSecretData(k8sSecret, gitData) {
+		// Drift detected - compute detailed diff
+		differences := k8s.ComputeDiff(gitData, k8sData)
+
+		gitVersion := map[string]interface{}{
+			"keys": getMapKeys(gitData),
+			"hash": k8s.CalculateSecretHash(gitData),
+		}
+		k8sVersion := map[string]interface{}{
+			"keys": getMapKeys(k8sData),
+			"hash": k8s.CalculateSecretHash(k8sData),
+		}
+		diffMap := map[string]interface{}{
+			"differences": differences,
+		}
+
+		event := &models.DriftEvent{
+			SecretName:  secret.SecretName,
+			NamespaceID: secret.NamespaceID,
+			DetectedAt:  time.Now(),
+			GitVersion:  mustMarshalJSON(gitVersion),
+			K8sVersion:  mustMarshalJSON(k8sVersion),
+			Diff:        mustMarshalJSON(diffMap),
+		}
+
+		// Save drift event to database
+		if err := d.db.Create(event).Error; err != nil {
+			return nil, fmt.Errorf("failed to save drift event: %w", err)
+		}
+
+		// Send webhook notification
+		if d.webhookClient != nil {
+			notification := notifications.DriftNotification{
+				Namespace:  namespace.Name,
+				SecretName: secret.SecretName,
+				DriftType:  "data_mismatch",
+				DetectedAt: event.DetectedAt,
+				Message:    fmt.Sprintf("⚠️ Drift detected: %s/%s - Data mismatch between Git and Kubernetes", namespace.Name, secret.SecretName),
+			}
+
+			if err := d.webhookClient.SendDriftNotification(notification); err != nil {
+				logger.Error("Failed to send webhook notification", "error", err)
+				// Don't fail drift detection if webhook fails
+			}
+		}
+
+		return event, nil
+	}
+
+	// No drift detected
+	return nil, nil
+}
+
+// detectDriftForSecretWithClient is a helper that performs drift detection with a specific K8s client
+// Used by DetectDriftForAllClusters to pass per-cluster clients
+func (d *DriftDetector) detectDriftForSecretWithClient(k8sClient K8sClientInterface, secret *models.SecretDraft, namespace *models.Namespace, clusterName string) (*models.DriftEvent, error) {
+	// 1. Decrypt secret from Git using SOPS
+	var encryptedYAML []byte
+	var filePath string
+	var err error
+
+	// Try dual-path mode if enabled (backward compatibility during migration)
+	if d.cfg.EnableDualPathMode {
+		encryptedYAML, filePath, err = d.gitClient.ReadFileWithFallback(clusterName, namespace.Name, secret.SecretName)
+	} else {
+		filePath = d.gitClient.GetFilePath(clusterName, namespace.Name, secret.SecretName)
+		encryptedYAML, err = d.gitClient.ReadFile(filePath)
+	}
+
+	if err != nil {
+		// File missing from Git - this is drift!
+		gitVersion := make(map[string]interface{})
+		k8sVersion := map[string]interface{}{
+			"status": "file_missing_from_git",
+		}
+
+		event := &models.DriftEvent{
+			SecretName:  secret.SecretName,
+			NamespaceID: secret.NamespaceID,
+			DetectedAt:  time.Now(),
+			GitVersion:  mustMarshalJSON(gitVersion),
+			K8sVersion:  mustMarshalJSON(k8sVersion),
+			Diff:        mustMarshalJSON(map[string]string{"error": fmt.Sprintf("Secret file missing from Git repository: %s", filePath)}),
+		}
+
+		// Save drift event to database
+		if err := d.db.Create(event).Error; err != nil {
+			return nil, fmt.Errorf("failed to save drift event: %w", err)
+		}
+
+		return event, nil
+	}
+
+	// Decrypt the YAML
+	decryptedYAML, err := d.sopsClient.DecryptYAML(encryptedYAML)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt secret from Git: %w", err)
+	}
+
+	// Parse YAML - use intermediate struct because SOPS-decrypted YAML has base64 strings,
+	// not []byte which corev1.Secret.Data expects
+	k8sSecretYAML, err := parseSecretYAML(decryptedYAML)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse decrypted YAML: %w", err)
+	}
+
+	gitData := k8s.NormalizeSecretData(k8sSecretYAML)
+
+	// 2. Get secret from Kubernetes using the passed client
+	k8sSecret, err := k8sClient.GetSecret(namespace.Name, secret.SecretName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Secret missing from Kubernetes cluster

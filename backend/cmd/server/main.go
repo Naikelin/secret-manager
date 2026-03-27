@@ -96,8 +96,6 @@ func main() {
 	k8sClient, gitClient, sopsClient := initClientsForDrift(cfg)
 
 	// Initialize ClientManager for multi-cluster support
-	// Note: Single K8sClient still used for backward compatibility with drift detector
-	// TODO Phase 5: Migrate drift detector to use ClientManager
 	clientManager := k8s.NewClientManager(cfg.KubeconfigsDir, db)
 	logger.Info("ClientManager initialized successfully", "kubeconfigsDir", cfg.KubeconfigsDir)
 
@@ -113,7 +111,7 @@ func main() {
 		logger.Warn("SOPS client not initialized, skipping Git sync")
 	}
 
-	if k8sClient != nil && gitClient != nil && sopsClient != nil {
+	if clientManager != nil && gitClient != nil && sopsClient != nil {
 		// Initialize webhook client
 		webhookURL := os.Getenv("DRIFT_WEBHOOK_URL")
 		webhookClient := notifications.NewWebhookClient(webhookURL)
@@ -133,7 +131,9 @@ func main() {
 			}
 		}
 
-		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient, fluxClient, cfg)
+		// Wrap clientManager to satisfy drift detector interface
+		wrappedClientManager := drift.WrapClientManager(clientManager)
+		driftDetector = drift.NewDriftDetector(db, wrappedClientManager, gitClient, sopsClient, webhookClient, fluxClient, cfg)
 		logger.Info("Drift detector initialized successfully")
 	} else {
 		logger.Warn("Drift detector not initialized - some clients are unavailable")
@@ -251,26 +251,28 @@ func startDriftDetectionJob(ctx context.Context, db *gorm.DB, detector *drift.Dr
 	}
 }
 
-// checkDriftForAllNamespaces checks all namespaces for drift
+// checkDriftForAllNamespaces checks all clusters and namespaces for drift
 func checkDriftForAllNamespaces(db *gorm.DB, detector *drift.DriftDetector) {
-	var namespaces []models.Namespace
-	if err := db.Find(&namespaces).Error; err != nil {
-		logger.Error("Failed to fetch namespaces for drift check", "error", err)
+	logger.Info("Running multi-cluster drift detection job")
+
+	// Use the new multi-cluster drift detection method
+	driftEvents, err := detector.DetectDriftForAllClusters()
+	if err != nil {
+		logger.Error("Multi-cluster drift detection failed", "error", err)
 		return
 	}
 
-	for _, ns := range namespaces {
-		logger.Info("Running drift check", "namespace", ns.Name)
+	// Log summary
+	totalDriftEvents := 0
+	for clusterID, events := range driftEvents {
+		totalDriftEvents += len(events)
+		logger.Warn("Drift detected in cluster", "cluster_id", clusterID, "drift_count", len(events))
+	}
 
-		events, err := detector.DetectDriftForNamespace(ns.ID)
-		if err != nil {
-			logger.Error("Drift detection failed", "namespace", ns.Name, "error", err)
-			continue
-		}
-
-		if len(events) > 0 {
-			logger.Warn("Drift detected", "namespace", ns.Name, "count", len(events))
-		}
+	if totalDriftEvents == 0 {
+		logger.Info("No drift detected across all clusters")
+	} else {
+		logger.Warn("Drift detection complete", "total_drift_events", totalDriftEvents, "clusters_with_drift", len(driftEvents))
 	}
 }
 

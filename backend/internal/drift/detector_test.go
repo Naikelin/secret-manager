@@ -355,7 +355,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -416,7 +416,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -470,7 +470,7 @@ func TestDetectDriftForSecret_GitFileMissing(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -516,7 +516,7 @@ func TestDetectDriftForSecret_DraftSecret(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -600,7 +600,7 @@ data:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift for entire namespace
 	events, err := detector.DetectDriftForNamespace(namespace.ID)
@@ -656,7 +656,7 @@ func TestDetectDriftForSecret_DecryptionError(t *testing.T) {
 	k8sClient := &MockK8sClient{}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -726,7 +726,7 @@ stringData:
 	}
 
 	// Create drift detector
-	detector := NewDriftDetector(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+	detector := NewDriftDetectorWithSingleClient(db, k8sClient, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
 
 	// Detect drift
 	event, err := detector.DetectDriftForSecret(secret.ID)
@@ -742,4 +742,520 @@ stringData:
 
 	differences := diff["differences"].([]interface{})
 	assert.Contains(t, differences, "Key 'password' added in K8s (not in Git)")
+}
+
+// MockClientManager for testing
+type MockClientManager struct {
+	GetClientFunc   func(clusterID uuid.UUID) (K8sClientInterface, error)
+	HealthCheckFunc func(clusterID uuid.UUID) (bool, error)
+}
+
+func (m *MockClientManager) GetClient(clusterID uuid.UUID) (K8sClientInterface, error) {
+	if m.GetClientFunc != nil {
+		return m.GetClientFunc(clusterID)
+	}
+	return nil, fmt.Errorf("cluster not found")
+}
+
+func (m *MockClientManager) HealthCheck(clusterID uuid.UUID) (bool, error) {
+	if m.HealthCheckFunc != nil {
+		return m.HealthCheckFunc(clusterID)
+	}
+	return true, nil
+}
+
+// TestDetectDriftForAllClusters_MultiClusterSuccess tests drift detection across multiple healthy clusters
+func TestDetectDriftForAllClusters_MultiClusterSuccess(t *testing.T) {
+	// Setup in-memory database
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Migrate schema
+	err = db.AutoMigrate(&models.Cluster{}, &models.Namespace{}, &models.SecretDraft{}, &models.DriftEvent{})
+	require.NoError(t, err)
+
+	// Create two clusters
+	cluster1 := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "devops",
+		Environment: "prod",
+		IsHealthy:   true,
+	}
+	cluster2 := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "staging",
+		Environment: "staging",
+		IsHealthy:   true,
+	}
+	require.NoError(t, db.Create(&cluster1).Error)
+	require.NoError(t, db.Create(&cluster2).Error)
+
+	// Create namespaces in each cluster
+	ns1 := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "default",
+		ClusterID: &cluster1.ID,
+	}
+	ns2 := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "production",
+		ClusterID: &cluster2.ID,
+	}
+	require.NoError(t, db.Create(&ns1).Error)
+	require.NoError(t, db.Create(&ns2).Error)
+
+	// Create secrets in each namespace
+	secret1 := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "db-creds",
+		NamespaceID: ns1.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"username":"admin"}`),
+	}
+	secret2 := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "api-key",
+		NamespaceID: ns2.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"key":"secret"}`),
+	}
+	require.NoError(t, db.Create(&secret1).Error)
+	require.NoError(t, db.Create(&secret2).Error)
+
+	// Mock ClientManager returning different K8s clients per cluster
+	clientManager := &MockClientManager{
+		GetClientFunc: func(clusterID uuid.UUID) (K8sClientInterface, error) {
+			// Both clusters return working K8s clients with mismatched secrets (drift)
+			return &MockK8sClient{
+				GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
+					return &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      name,
+							Namespace: namespace,
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"mismatch": []byte("drift-detected"), // Different from Git
+						},
+					}, nil
+				},
+			}, nil
+		},
+	}
+
+	// Mock Git client
+	gitClient := &MockGitClient{
+		EnsureRepoFunc: func() error { return nil },
+		ReadFileFunc: func(path string) ([]byte, error) {
+			// Return valid secret YAML (different from K8s)
+			return []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: test
+  namespace: test-ns
+type: Opaque
+data:
+  username: YWRtaW4=
+`), nil
+		},
+	}
+
+	// Mock SOPS client
+	sopsClient := &MockSOPSClient{}
+
+	// Create drift detector
+	detector := NewDriftDetector(db, clientManager, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+
+	// Run multi-cluster drift detection
+	driftEvents, err := detector.DetectDriftForAllClusters()
+
+	// Assert success
+	require.NoError(t, err)
+	assert.Len(t, driftEvents, 2, "Both clusters should have drift events")
+
+	// Verify drift events for cluster1
+	assert.Contains(t, driftEvents, cluster1.ID)
+	assert.Len(t, driftEvents[cluster1.ID], 1)
+
+	// Verify drift events for cluster2
+	assert.Contains(t, driftEvents, cluster2.ID)
+	assert.Len(t, driftEvents[cluster2.ID], 1)
+
+	// Verify secrets marked as drifted
+	var updatedSecret1 models.SecretDraft
+	require.NoError(t, db.First(&updatedSecret1, secret1.ID).Error)
+	assert.Equal(t, "drifted", updatedSecret1.Status)
+
+	var updatedSecret2 models.SecretDraft
+	require.NoError(t, db.First(&updatedSecret2, secret2.ID).Error)
+	assert.Equal(t, "drifted", updatedSecret2.Status)
+}
+
+// TestDetectDriftForAllClusters_ClusterUnreachable tests that drift detection continues when one cluster is unreachable
+func TestDetectDriftForAllClusters_ClusterUnreachable(t *testing.T) {
+	// Setup in-memory database
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Migrate schema
+	err = db.AutoMigrate(&models.Cluster{}, &models.Namespace{}, &models.SecretDraft{}, &models.DriftEvent{})
+	require.NoError(t, err)
+
+	// Create two clusters
+	cluster1 := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "healthy-cluster",
+		Environment: "prod",
+		IsHealthy:   true,
+	}
+	cluster2 := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "unreachable-cluster",
+		Environment: "staging",
+		IsHealthy:   true, // Will become unhealthy
+	}
+	require.NoError(t, db.Create(&cluster1).Error)
+	require.NoError(t, db.Create(&cluster2).Error)
+
+	// Create namespaces
+	ns1 := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "default",
+		ClusterID: &cluster1.ID,
+	}
+	ns2 := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "production",
+		ClusterID: &cluster2.ID,
+	}
+	require.NoError(t, db.Create(&ns1).Error)
+	require.NoError(t, db.Create(&ns2).Error)
+
+	// Create secrets
+	secret1 := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "db-creds",
+		NamespaceID: ns1.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"username":"admin"}`),
+	}
+	secret2 := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "api-key",
+		NamespaceID: ns2.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"key":"secret"}`),
+	}
+	require.NoError(t, db.Create(&secret1).Error)
+	require.NoError(t, db.Create(&secret2).Error)
+
+	// Mock ClientManager: cluster1 works, cluster2 fails
+	clientManager := &MockClientManager{
+		GetClientFunc: func(clusterID uuid.UUID) (K8sClientInterface, error) {
+			if clusterID == cluster1.ID {
+				// Healthy cluster - return working client
+				return &MockK8sClient{
+					GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
+						return &corev1.Secret{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      name,
+								Namespace: namespace,
+							},
+							Type: corev1.SecretTypeOpaque,
+							Data: map[string][]byte{
+								"drift": []byte("detected"),
+							},
+						}, nil
+					},
+				}, nil
+			}
+			// Cluster2 unreachable
+			return nil, fmt.Errorf("cluster API unreachable: connection timeout")
+		},
+	}
+
+	// Mock Git client
+	gitClient := &MockGitClient{
+		EnsureRepoFunc: func() error { return nil },
+		ReadFileFunc: func(path string) ([]byte, error) {
+			return []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: test
+  namespace: test-ns
+type: Opaque
+data:
+  username: YWRtaW4=
+`), nil
+		},
+	}
+
+	// Mock SOPS client
+	sopsClient := &MockSOPSClient{}
+
+	// Create drift detector
+	detector := NewDriftDetector(db, clientManager, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+
+	// Run multi-cluster drift detection
+	driftEvents, err := detector.DetectDriftForAllClusters()
+
+	// Assert success (drift detection doesn't abort on cluster failure)
+	require.NoError(t, err)
+
+	// Verify only cluster1 has drift events (cluster2 was skipped)
+	assert.Len(t, driftEvents, 1, "Only healthy cluster should have drift events")
+	assert.Contains(t, driftEvents, cluster1.ID)
+	assert.NotContains(t, driftEvents, cluster2.ID, "Unreachable cluster should be skipped")
+
+	// Verify secret1 marked as drifted
+	var updatedSecret1 models.SecretDraft
+	require.NoError(t, db.First(&updatedSecret1, secret1.ID).Error)
+	assert.Equal(t, "drifted", updatedSecret1.Status)
+
+	// Verify secret2 NOT marked as drifted (cluster unreachable)
+	var updatedSecret2 models.SecretDraft
+	require.NoError(t, db.First(&updatedSecret2, secret2.ID).Error)
+	assert.Equal(t, "published", updatedSecret2.Status, "Secret in unreachable cluster should remain published")
+}
+
+// TestDetectDriftForAllClusters_NoDrift tests drift detection when all secrets match
+func TestDetectDriftForAllClusters_NoDrift(t *testing.T) {
+	// Setup in-memory database
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Migrate schema
+	err = db.AutoMigrate(&models.Cluster{}, &models.Namespace{}, &models.SecretDraft{}, &models.DriftEvent{})
+	require.NoError(t, err)
+
+	// Create cluster
+	cluster := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "devops",
+		Environment: "prod",
+		IsHealthy:   true,
+	}
+	require.NoError(t, db.Create(&cluster).Error)
+
+	// Create namespace
+	ns := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "default",
+		ClusterID: &cluster.ID,
+	}
+	require.NoError(t, db.Create(&ns).Error)
+
+	// Create secret
+	secret := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "db-creds",
+		NamespaceID: ns.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"username":"admin"}`),
+	}
+	require.NoError(t, db.Create(&secret).Error)
+
+	// Mock ClientManager with matching K8s data
+	clientManager := &MockClientManager{
+		GetClientFunc: func(clusterID uuid.UUID) (K8sClientInterface, error) {
+			return &MockK8sClient{
+				GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
+					return &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      name,
+							Namespace: namespace,
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"username": []byte("admin"), // Matches Git
+						},
+					}, nil
+				},
+			}, nil
+		},
+	}
+
+	// Mock Git client returning matching data
+	gitClient := &MockGitClient{
+		EnsureRepoFunc: func() error { return nil },
+		ReadFileFunc: func(path string) ([]byte, error) {
+			return []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: db-creds
+  namespace: default
+type: Opaque
+data:
+  username: YWRtaW4=
+`), nil
+		},
+	}
+
+	// Mock SOPS client
+	sopsClient := &MockSOPSClient{}
+
+	// Create drift detector
+	detector := NewDriftDetector(db, clientManager, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+
+	// Run multi-cluster drift detection
+	driftEvents, err := detector.DetectDriftForAllClusters()
+
+	// Assert no drift detected
+	require.NoError(t, err)
+	assert.Empty(t, driftEvents, "No drift should be detected when secrets match")
+
+	// Verify secret status unchanged
+	var updatedSecret models.SecretDraft
+	require.NoError(t, db.First(&updatedSecret, secret.ID).Error)
+	assert.Equal(t, "published", updatedSecret.Status)
+}
+
+// TestDetectDriftForAllClusters_ClusterIsolation tests that secrets from cluster A don't affect cluster B
+func TestDetectDriftForAllClusters_ClusterIsolation(t *testing.T) {
+	// Setup in-memory database
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Migrate schema
+	err = db.AutoMigrate(&models.Cluster{}, &models.Namespace{}, &models.SecretDraft{}, &models.DriftEvent{})
+	require.NoError(t, err)
+
+	// Create two clusters
+	cluster1 := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "cluster-a",
+		Environment: "prod",
+		IsHealthy:   true,
+	}
+	cluster2 := models.Cluster{
+		ID:          uuid.New(),
+		Name:        "cluster-b",
+		Environment: "staging",
+		IsHealthy:   true,
+	}
+	require.NoError(t, db.Create(&cluster1).Error)
+	require.NoError(t, db.Create(&cluster2).Error)
+
+	// Create namespaces with SAME NAME in both clusters
+	ns1 := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "default", // Same namespace name
+		ClusterID: &cluster1.ID,
+	}
+	ns2 := models.Namespace{
+		ID:        uuid.New(),
+		Name:      "default", // Same namespace name
+		ClusterID: &cluster2.ID,
+	}
+	require.NoError(t, db.Create(&ns1).Error)
+	require.NoError(t, db.Create(&ns2).Error)
+
+	// Create secrets with SAME NAME in both namespaces
+	secret1 := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "shared-secret", // Same secret name
+		NamespaceID: ns1.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"key":"cluster-a-value"}`),
+	}
+	secret2 := models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "shared-secret", // Same secret name
+		NamespaceID: ns2.ID,
+		Status:      "published",
+		Data:        datatypes.JSON(`{"key":"cluster-b-value"}`),
+	}
+	require.NoError(t, db.Create(&secret1).Error)
+	require.NoError(t, db.Create(&secret2).Error)
+
+	// Mock ClientManager returning DIFFERENT K8s data per cluster
+	clientManager := &MockClientManager{
+		GetClientFunc: func(clusterID uuid.UUID) (K8sClientInterface, error) {
+			if clusterID == cluster1.ID {
+				// Cluster A returns secret with "cluster-a-k8s"
+				return &MockK8sClient{
+					GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
+						return &corev1.Secret{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      name,
+								Namespace: namespace,
+							},
+							Type: corev1.SecretTypeOpaque,
+							Data: map[string][]byte{
+								"key": []byte("cluster-a-k8s"),
+							},
+						}, nil
+					},
+				}, nil
+			}
+			// Cluster B returns secret with "cluster-b-k8s"
+			return &MockK8sClient{
+				GetSecretFunc: func(namespace, name string) (*corev1.Secret, error) {
+					return &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      name,
+							Namespace: namespace,
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"key": []byte("cluster-b-k8s"),
+						},
+					}, nil
+				},
+			}, nil
+		},
+	}
+
+	// Mock Git client returning DIFFERENT data per cluster
+	gitClient := &MockGitClient{
+		EnsureRepoFunc: func() error { return nil },
+		ReadFileFunc: func(path string) ([]byte, error) {
+			// Return different Git data based on path
+			if path == "clusters/cluster-a/namespaces/default/secrets/shared-secret.yaml" {
+				return []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: shared-secret
+  namespace: default
+type: Opaque
+data:
+  key: Y2x1c3Rlci1hLWdpdA==
+`), nil
+			}
+			if path == "clusters/cluster-b/namespaces/default/secrets/shared-secret.yaml" {
+				return []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: shared-secret
+  namespace: default
+type: Opaque
+data:
+  key: Y2x1c3Rlci1iLWdpdA==
+`), nil
+			}
+			return nil, fmt.Errorf("file not found: %s", path)
+		},
+	}
+
+	// Mock SOPS client
+	sopsClient := &MockSOPSClient{}
+
+	// Create drift detector
+	detector := NewDriftDetector(db, clientManager, gitClient, sopsClient, nil, getTestFluxClient(), getTestConfig())
+
+	// Run multi-cluster drift detection
+	driftEvents, err := detector.DetectDriftForAllClusters()
+
+	// Assert both clusters have drift (Git vs K8s mismatch)
+	require.NoError(t, err)
+	assert.Len(t, driftEvents, 2, "Both clusters should have drift")
+	assert.Len(t, driftEvents[cluster1.ID], 1, "Cluster A should have 1 drift event")
+	assert.Len(t, driftEvents[cluster2.ID], 1, "Cluster B should have 1 drift event")
+
+	// Verify drift events reference correct cluster namespaces
+	cluster1Events := driftEvents[cluster1.ID]
+	assert.Equal(t, ns1.ID, cluster1Events[0].NamespaceID, "Cluster A drift should reference namespace in cluster A")
+
+	cluster2Events := driftEvents[cluster2.ID]
+	assert.Equal(t, ns2.ID, cluster2Events[0].NamespaceID, "Cluster B drift should reference namespace in cluster B")
 }

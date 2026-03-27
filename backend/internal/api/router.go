@@ -102,7 +102,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config, clientManager k8s.ClientManager)
 
 	// Initialize drift detector for drift handlers
 	var driftDetector *drift.DriftDetector
-	if k8sClient != nil && gitClient != nil && sopsClient != nil {
+	if clientManager != nil && gitClient != nil && sopsClient != nil {
 		// Initialize webhook client
 		webhookURL := os.Getenv("DRIFT_WEBHOOK_URL")
 		webhookClient := notifications.NewWebhookClient(webhookURL)
@@ -123,7 +123,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config, clientManager k8s.ClientManager)
 			}
 		}
 
-		driftDetector = drift.NewDriftDetector(db, k8sClient, gitClient, sopsClient, webhookClient, fluxClient, cfg)
+		// Wrap clientManager to satisfy drift detector interface
+		wrappedClientManager := drift.WrapClientManager(clientManager)
+		driftDetector = drift.NewDriftDetector(db, wrappedClientManager, gitClient, sopsClient, webhookClient, fluxClient, cfg)
 	}
 	driftHandlers := NewDriftHandlers(db, driftDetector)
 	driftResolutionHandlers := NewDriftResolutionHandlers(db, driftDetector)
