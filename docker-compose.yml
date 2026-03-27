@@ -52,15 +52,25 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       AWS_ENDPOINT_URL: http://host.docker.internal:4566
       AWS_EC2_METADATA_DISABLED: "true"
-      # Kubernetes configuration
+      # Kubernetes configuration - Multi-cluster support
+      # For single cluster: uses ~/.kube/config (mounted below)
       K8S_KUBECONFIG: /app/.kube/config
+      # For multi-cluster: place kubeconfig files in ./kubeconfigs/ directory
+      # Naming convention: cluster-name.yaml (e.g., dev-cluster.yaml, prod-cluster.yaml)
+      # Each file will be detected and loaded automatically
+      K8S_KUBECONFIGS_DIR: /etc/kubeconfigs
       DRIFT_CHECK_INTERVAL: 5m
       DRIFT_WEBHOOK_URL: ${DRIFT_WEBHOOK_URL:-}
     volumes:
       - ./backend:/app
       - ./dev-data/secrets-repo:/data/secrets-repo
       - ./dev-data/ssh-keys:/app/.ssh:ro
+      # Single cluster kubeconfig (default k8s context)
       - ~/.kube:/app/.kube:ro
+      # Multi-cluster kubeconfigs directory
+      # Place your cluster-specific kubeconfig files in ./kubeconfigs/
+      # Example: ./kubeconfigs/dev-cluster.yaml, ./kubeconfigs/prod-cluster.yaml
+      - ./kubeconfigs:/etc/kubeconfigs:ro
       - backend_cache:/go/pkg/mod
     extra_hosts:
       - "host.docker.internal:host-gateway"
