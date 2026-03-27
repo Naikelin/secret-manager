@@ -9,7 +9,7 @@ import (
 
 // User represents a cached OAuth2 user
 type User struct {
-	ID         uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID         uuid.UUID `gorm:"type:uuid;primary_key" json:"id"`
 	Email      string    `gorm:"uniqueIndex;not null" json:"email"`
 	Name       string    `gorm:"not null" json:"name"`
 	AzureADOID string    `gorm:"column:azure_ad_oid" json:"azure_ad_oid,omitempty"`
@@ -29,7 +29,7 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 
 // Group represents an Azure AD group or local group
 type Group struct {
-	ID         uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID         uuid.UUID `gorm:"type:uuid;primary_key" json:"id"`
 	Name       string    `gorm:"uniqueIndex;not null" json:"name"`
 	AzureADGID string    `gorm:"column:azure_ad_gid" json:"azure_ad_gid,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -48,13 +48,15 @@ func (g *Group) BeforeCreate(tx *gorm.DB) error {
 
 // Namespace represents a Kubernetes namespace
 type Namespace struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
-	Name        string    `gorm:"not null" json:"name"`
-	Cluster     string    `gorm:"not null" json:"cluster"`
-	Environment string    `gorm:"not null;check:environment IN ('dev', 'staging', 'prod')" json:"environment"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          uuid.UUID  `gorm:"type:uuid;primary_key" json:"id"`
+	Name        string     `gorm:"not null" json:"name"`
+	ClusterID   *uuid.UUID `gorm:"type:uuid;index:idx_namespaces_cluster_id" json:"cluster_id,omitempty"`
+	Cluster     string     `gorm:"not null" json:"cluster"` // Deprecated: will be removed after migration
+	Environment string     `gorm:"not null;check:environment IN ('dev', 'staging', 'prod')" json:"environment"`
+	CreatedAt   time.Time  `gorm:"" json:"created_at"`
 
 	// Relationships
+	ClusterRef   *Cluster          `gorm:"foreignKey:ClusterID;constraint:OnDelete:CASCADE" json:"cluster_ref,omitempty"`
 	Permissions  []GroupPermission `gorm:"foreignKey:NamespaceID" json:"permissions,omitempty"`
 	SecretDrafts []SecretDraft     `gorm:"foreignKey:NamespaceID" json:"secret_drafts,omitempty"`
 	DriftEvents  []DriftEvent      `gorm:"foreignKey:NamespaceID" json:"drift_events,omitempty"`
@@ -73,7 +75,7 @@ func (n *Namespace) TableName() string {
 
 // GroupPermission represents RBAC permissions
 type GroupPermission struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID          uuid.UUID `gorm:"type:uuid;primary_key" json:"id"`
 	GroupID     uuid.UUID `gorm:"type:uuid;not null;index:idx_group_permissions_group" json:"group_id"`
 	NamespaceID uuid.UUID `gorm:"type:uuid;not null;index:idx_group_permissions_namespace" json:"namespace_id"`
 	Role        string    `gorm:"not null;check:role IN ('viewer', 'editor', 'admin')" json:"role"`

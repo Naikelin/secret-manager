@@ -10,7 +10,7 @@ import (
 
 // SecretDraft represents a secret in the staging area
 type SecretDraft struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID          uuid.UUID      `gorm:"type:uuid;primary_key" json:"id"`
 	SecretName  string         `gorm:"not null;index:idx_secret_drafts_secret_namespace" json:"secret_name"`
 	NamespaceID uuid.UUID      `gorm:"type:uuid;not null;index:idx_secret_drafts_secret_namespace" json:"namespace_id"`
 	Data        datatypes.JSON `gorm:"type:jsonb;not null" json:"data"`
@@ -43,7 +43,7 @@ func (sd *SecretDraft) TableName() string {
 
 // DriftEvent represents a Git vs K8s mismatch
 type DriftEvent struct {
-	ID               uuid.UUID      `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID               uuid.UUID      `gorm:"type:uuid;primary_key" json:"id"`
 	SecretName       string         `gorm:"not null;index:idx_drift_events_secret_namespace" json:"secret_name"`
 	NamespaceID      uuid.UUID      `gorm:"type:uuid;not null;index:idx_drift_events_secret_namespace" json:"namespace_id"`
 	DetectedAt       time.Time      `gorm:"index:idx_drift_events_detected_at" json:"detected_at"`
@@ -77,7 +77,7 @@ func (de *DriftEvent) TableName() string {
 
 // AuditLog represents an audit trail entry
 type AuditLog struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	ID           uuid.UUID      `gorm:"type:uuid;primary_key" json:"id"`
 	UserID       *uuid.UUID     `gorm:"type:uuid;index:idx_audit_logs_user_timestamp" json:"user_id,omitempty"`
 	ActionType   string         `gorm:"not null" json:"action_type"`
 	ResourceType string         `gorm:"not null" json:"resource_type"`

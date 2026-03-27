@@ -73,6 +73,7 @@ func main() {
 	// Run migrations
 	logger.Info("Running database migrations...")
 	err = db.AutoMigrate(
+		&models.Cluster{},
 		&models.User{},
 		&models.Group{},
 		&models.Namespace{},
