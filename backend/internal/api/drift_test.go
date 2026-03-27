@@ -124,6 +124,7 @@ func (m *driftMockSOPSClient) EncryptYAML(yamlContent []byte) ([]byte, error) {
 type driftMockK8sClient struct {
 	getSecretFunc   func(namespace, name string) (*corev1.Secret, error)
 	applySecretFunc func(ctx context.Context, namespace string, secret *corev1.Secret) error
+	getClientFunc   func(clusterID uuid.UUID) (drift.K8sClientInterface, error)
 }
 
 func (m *driftMockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, error) {
@@ -131,6 +132,18 @@ func (m *driftMockK8sClient) GetSecret(namespace, name string) (*corev1.Secret, 
 		return m.getSecretFunc(namespace, name)
 	}
 	return nil, fmt.Errorf("secret not found")
+}
+
+func (m *driftMockK8sClient) GetClient(clusterID uuid.UUID) (drift.K8sClientInterface, error) {
+	if m.getClientFunc != nil {
+		return m.getClientFunc(clusterID)
+	}
+	// Return self as a K8sClientInterface
+	return m, nil
+}
+
+func (m *driftMockK8sClient) HealthCheck(clusterID uuid.UUID) (bool, error) {
+	return true, nil
 }
 
 // setupDriftTestDB creates an in-memory database for drift testing

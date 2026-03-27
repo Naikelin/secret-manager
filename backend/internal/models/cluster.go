@@ -12,7 +12,7 @@ type Cluster struct {
 	ID              uuid.UUID  `gorm:"type:uuid;primary_key" json:"id"`
 	Name            string     `gorm:"uniqueIndex;not null" json:"name" binding:"required"`
 	KubeconfigRef   string     `gorm:"column:kubeconfig_ref;not null" json:"kubeconfig_ref" binding:"required"`
-	Environment     string     `gorm:"not null;check:environment IN ('dev', 'staging', 'prod')" json:"environment" binding:"required,oneof=dev staging prod"`
+	Environment     string     `gorm:"not null;check:environment IN ('development', 'staging', 'production')" json:"environment" binding:"required,oneof=development staging production"`
 	IsHealthy       bool       `gorm:"default:true" json:"is_healthy"`
 	LastHealthCheck *time.Time `json:"last_health_check,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`

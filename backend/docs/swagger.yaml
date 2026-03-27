@@ -1,5 +1,28 @@
 basePath: /api/v1
 definitions:
+  github_com_yourorg_secret-manager_internal_models.Cluster:
+    properties:
+      created_at:
+        type: string
+      environment:
+        type: string
+      id:
+        type: string
+      is_healthy:
+        type: boolean
+      kubeconfig_ref:
+        type: string
+      last_health_check:
+        type: string
+      name:
+        type: string
+      namespaces:
+        items:
+          $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+        type: array
+      updated_at:
+        type: string
+    type: object
   github_com_yourorg_secret-manager_internal_models.AuditLog:
     properties:
       action_type:
@@ -202,6 +225,19 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  internal_api.CreateClusterRequest:
+    properties:
+      environment:
+        type: string
+      kubeconfig_ref:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    - kubeconfig_ref
+    - environment
     type: object
   internal_api.CreateSecretRequest:
     properties:
@@ -618,6 +654,243 @@ paths:
       summary: Mock authentication callback (DEV ONLY)
       tags:
       - authentication
+  /clusters:
+    get:
+      consumes:
+      - application/json
+      description: Get all Kubernetes clusters configured in the system
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of clusters
+          schema:
+            items:
+              $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Cluster'
+            type: array
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List all clusters
+      tags:
+      - clusters
+    post:
+      consumes:
+      - application/json
+      description: Register a new Kubernetes cluster in the system
+      parameters:
+      - description: Cluster data
+        in: body
+        name: cluster
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.CreateClusterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Cluster created successfully
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Cluster'
+        "400":
+          description: Invalid request body or kubeconfig validation failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Cluster name already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a new cluster
+      tags:
+      - clusters
+  /clusters/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a cluster from the system. Fails if the cluster has associated namespaces.
+      parameters:
+      - description: Cluster ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Cluster deleted successfully
+        "400":
+          description: Invalid cluster ID format
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Cluster not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Cluster has namespaces (cannot delete)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a cluster
+      tags:
+      - clusters
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific cluster including health status
+      parameters:
+      - description: Cluster ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cluster details
+          schema:
+            $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Cluster'
+        "400":
+          description: Invalid cluster ID format
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Cluster not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get cluster by ID
+      tags:
+      - clusters
+  /clusters/{id}/health:
+    get:
+      consumes:
+      - application/json
+      description: Perform a health check on a cluster's K8s API connectivity
+      parameters:
+      - description: Cluster ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Health check result
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid cluster ID format
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Cluster not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check cluster health
+      tags:
+      - clusters
+  /clusters/{id}/namespaces:
+    get:
+      consumes:
+      - application/json
+      description: Get all namespaces belonging to a specific cluster
+      parameters:
+      - description: Cluster ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of namespaces in the cluster
+          schema:
+            items:
+              $ref: '#/definitions/github_com_yourorg_secret-manager_internal_models.Namespace'
+            type: array
+        "400":
+          description: Invalid cluster ID format
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Cluster not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List namespaces in a cluster
+      tags:
+      - clusters
   /drift-events/{drift_id}/compare:
     get:
       consumes:

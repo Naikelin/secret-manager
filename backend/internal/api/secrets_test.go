@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -1120,4 +1122,308 @@ func TestGetSecretWithGitVersion(t *testing.T) {
 		_, hasGitData := response["git_data"]
 		assert.False(t, hasGitData, "git_data should not be present when Git read fails")
 	})
+}
+
+// TestMultiClusterSecretPublish tests secret publishing across multiple clusters
+// This integration test verifies cluster isolation for secret storage
+func TestMultiClusterSecretPublish(t *testing.T) {
+	// Setup test database with all required tables
+	db := setupTestDB(t)
+
+	// Add clusters table for multi-cluster support
+	err := db.Exec(`
+		CREATE TABLE clusters (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			kubeconfig_ref TEXT NOT NULL,
+			environment TEXT NOT NULL CHECK(environment IN ('development', 'staging', 'production')),
+			is_healthy INTEGER DEFAULT 1,
+			last_health_check DATETIME,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
+	// Add user_groups join table
+	err = db.Exec(`
+		CREATE TABLE user_groups (
+			user_id TEXT NOT NULL,
+			group_id TEXT NOT NULL,
+			PRIMARY KEY (user_id, group_id)
+		)
+	`).Error
+	require.NoError(t, err)
+
+	// Update namespaces table to include cluster_id foreign key
+	err = db.Exec(`
+		DROP TABLE IF EXISTS namespaces
+	`).Error
+	require.NoError(t, err)
+
+	err = db.Exec(`
+		CREATE TABLE namespaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			cluster_id TEXT,
+			cluster TEXT NOT NULL,
+			environment TEXT NOT NULL CHECK(environment IN ('dev', 'staging', 'prod')),
+			created_at DATETIME,
+			FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE CASCADE
+		)
+	`).Error
+	require.NoError(t, err)
+
+	// Create test user
+	user, userCtx := createTestUser(t, db)
+
+	// Create test group
+	group := &models.Group{
+		ID:   uuid.New(),
+		Name: "test-group",
+	}
+	require.NoError(t, db.Create(group).Error)
+
+	// Associate user with group
+	err = db.Exec("INSERT INTO user_groups (user_id, group_id) VALUES (?, ?)", user.ID, group.ID).Error
+	require.NoError(t, err)
+
+	// Create Cluster A (production)
+	clusterA := &models.Cluster{
+		ID:            uuid.New(),
+		Name:          "cluster-a-prod",
+		KubeconfigRef: "/etc/kubeconfigs/cluster-a.yaml",
+		Environment:   "production",
+		IsHealthy:     true,
+	}
+	require.NoError(t, db.Create(clusterA).Error)
+
+	// Create Cluster B (staging)
+	clusterB := &models.Cluster{
+		ID:            uuid.New(),
+		Name:          "cluster-b-staging",
+		KubeconfigRef: "/etc/kubeconfigs/cluster-b.yaml",
+		Environment:   "staging",
+		IsHealthy:     true,
+	}
+	require.NoError(t, db.Create(clusterB).Error)
+
+	// Create Namespace in Cluster A
+	namespaceA := &models.Namespace{
+		ID:          uuid.New(),
+		Name:        "app-namespace",
+		ClusterID:   &clusterA.ID,
+		Cluster:     clusterA.Name,
+		Environment: "prod",
+	}
+	require.NoError(t, db.Create(namespaceA).Error)
+
+	// Create Namespace in Cluster B (same name, different cluster)
+	namespaceB := &models.Namespace{
+		ID:          uuid.New(),
+		Name:        "app-namespace",
+		ClusterID:   &clusterB.ID,
+		Cluster:     clusterB.Name,
+		Environment: "staging",
+	}
+	require.NoError(t, db.Create(namespaceB).Error)
+
+	// Grant permissions to both namespaces
+	permA := &models.GroupPermission{
+		ID:          uuid.New(),
+		GroupID:     group.ID,
+		NamespaceID: namespaceA.ID,
+		Role:        "admin",
+	}
+	require.NoError(t, db.Create(permA).Error)
+
+	permB := &models.GroupPermission{
+		ID:          uuid.New(),
+		GroupID:     group.ID,
+		NamespaceID: namespaceB.ID,
+		Role:        "admin",
+	}
+	require.NoError(t, db.Create(permB).Error)
+
+	// Create temporary Git repository directories for testing
+	tmpDir := t.TempDir()
+	gitRepoPathA := filepath.Join(tmpDir, "cluster-a-prod")
+	gitRepoPathB := filepath.Join(tmpDir, "cluster-b-staging")
+	require.NoError(t, os.MkdirAll(gitRepoPathA, 0755))
+	require.NoError(t, os.MkdirAll(gitRepoPathB, 0755))
+
+	// Create mock Git client that tracks writes by cluster
+	writtenFiles := make(map[string][]byte)
+	mockGitClient := &MockGitClient{
+		WriteFileFunc: func(path string, content []byte) error {
+			writtenFiles[path] = content
+			return nil
+		},
+		GetFilePathFunc: func(clusterName, namespace, secretName string) string {
+			return filepath.Join(clusterName, namespace, secretName+".yaml")
+		},
+		EnsureRepoFunc: func() error {
+			return nil
+		},
+		CommitFunc: func(message, authorName string, files []string) (string, error) {
+			return "commit-sha-" + files[0], nil
+		},
+		PushFunc: func() error {
+			return nil
+		},
+	}
+
+	// Create mock SOPS client that returns encrypted YAML
+	mockSOPSClient := &MockSOPSClient{
+		EncryptYAMLFunc: func(yamlContent []byte) ([]byte, error) {
+			return []byte("# SOPS encrypted:\n" + string(yamlContent)), nil
+		},
+	}
+
+	// Create mock ClientManager
+	mockClientManager := new(MockClientManager)
+	mockClientManager.On("GetClient", clusterA.ID).Return(nil, nil)
+	mockClientManager.On("GetClient", clusterB.ID).Return(nil, nil)
+
+	// Create publish handlers
+	publishHandlers := NewPublishHandlers(db, mockGitClient, mockSOPSClient, mockClientManager)
+
+	// Test Step 1: Create and publish secret X to Cluster A
+	secretXData := map[string]interface{}{
+		"db_password": "cluster-a-secret",
+		"api_key":     "key-for-prod",
+	}
+	secretXJSON, _ := json.Marshal(secretXData)
+	secretX := &models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "app-config",
+		NamespaceID: namespaceA.ID,
+		Data:        datatypes.JSON(secretXJSON),
+		Status:      "draft",
+		EditedBy:    &user.ID,
+	}
+	require.NoError(t, db.Create(secretX).Error)
+
+	// Publish secret X to Cluster A
+	reqX := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/"+namespaceA.ID.String()+"/secrets/app-config/publish", nil)
+	rctxX := chi.NewRouteContext()
+	rctxX.URLParams.Add("namespace", namespaceA.ID.String())
+	rctxX.URLParams.Add("name", "app-config")
+	reqX = reqX.WithContext(context.WithValue(reqX.Context(), chi.RouteCtxKey, rctxX))
+	reqX = withUserContext(reqX, userCtx)
+
+	wX := httptest.NewRecorder()
+	publishHandlers.PublishSecret(wX, reqX)
+
+	assert.Equal(t, http.StatusOK, wX.Code, "Publishing to Cluster A should succeed")
+
+	// Test Step 2: Create and publish secret Y to Cluster B
+	secretYData := map[string]interface{}{
+		"db_password": "cluster-b-secret",
+		"api_key":     "key-for-staging",
+	}
+	secretYJSON, _ := json.Marshal(secretYData)
+	secretY := &models.SecretDraft{
+		ID:          uuid.New(),
+		SecretName:  "app-config",
+		NamespaceID: namespaceB.ID,
+		Data:        datatypes.JSON(secretYJSON),
+		Status:      "draft",
+		EditedBy:    &user.ID,
+	}
+	require.NoError(t, db.Create(secretY).Error)
+
+	// Publish secret Y to Cluster B
+	reqY := httptest.NewRequest(http.MethodPost, "/api/v1/namespaces/"+namespaceB.ID.String()+"/secrets/app-config/publish", nil)
+	rctxY := chi.NewRouteContext()
+	rctxY.URLParams.Add("namespace", namespaceB.ID.String())
+	rctxY.URLParams.Add("name", "app-config")
+	reqY = reqY.WithContext(context.WithValue(reqY.Context(), chi.RouteCtxKey, rctxY))
+	reqY = withUserContext(reqY, userCtx)
+
+	wY := httptest.NewRecorder()
+	publishHandlers.PublishSecret(wY, reqY)
+
+	assert.Equal(t, http.StatusOK, wY.Code, "Publishing to Cluster B should succeed")
+
+	// Test Step 3: Verify cluster isolation
+	expectedPathA := filepath.Join("cluster-a-prod", "app-namespace", "app-config.yaml")
+	expectedPathB := filepath.Join("cluster-b-staging", "app-namespace", "app-config.yaml")
+
+	// Verify secret X was written to Cluster A's path only
+	assert.Contains(t, writtenFiles, expectedPathA, "Secret X should be written to Cluster A's path")
+	// The secret data is base64-encoded in the YAML, so check for base64 values or YAML structure
+	assert.Contains(t, string(writtenFiles[expectedPathA]), "app-namespace", "Cluster A secret should target correct namespace")
+	assert.Contains(t, string(writtenFiles[expectedPathA]), "app-config", "Cluster A secret should have correct name")
+
+	// Verify secret Y was written to Cluster B's path only
+	assert.Contains(t, writtenFiles, expectedPathB, "Secret Y should be written to Cluster B's path")
+	assert.Contains(t, string(writtenFiles[expectedPathB]), "app-namespace", "Cluster B secret should target correct namespace")
+	assert.Contains(t, string(writtenFiles[expectedPathB]), "app-config", "Cluster B secret should have correct name")
+
+	// Verify no cross-cluster leakage - ensure paths are completely separate
+	assert.NotEqual(t, writtenFiles[expectedPathA], writtenFiles[expectedPathB], "Cluster A and B should have different secret content")
+
+	// Verify both secrets exist in separate Git paths
+	assert.Len(t, writtenFiles, 2, "Should have exactly 2 files written (one per cluster)")
+
+	// Test Step 4: Verify database state
+	var dbSecretX models.SecretDraft
+	err = db.First(&dbSecretX, "id = ?", secretX.ID).Error
+	require.NoError(t, err)
+	assert.Equal(t, "published", dbSecretX.Status)
+	assert.NotEmpty(t, dbSecretX.CommitSHA)
+	assert.Contains(t, dbSecretX.CommitSHA, "cluster-a-prod")
+
+	var dbSecretY models.SecretDraft
+	err = db.First(&dbSecretY, "id = ?", secretY.ID).Error
+	require.NoError(t, err)
+	assert.Equal(t, "published", dbSecretY.Status)
+	assert.NotEmpty(t, dbSecretY.CommitSHA)
+	assert.Contains(t, dbSecretY.CommitSHA, "cluster-b-staging")
+
+	// Test Step 5: Verify API namespace listing per cluster
+	// Create ClusterHandlers to test GET /clusters/{id}/namespaces
+	clusterHandlers := NewClusterHandlers(db, mockClientManager)
+
+	// Test GET /clusters/{cluster-a}/namespaces
+	reqListA := httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterA.ID.String()+"/namespaces", nil)
+	rctxListA := chi.NewRouteContext()
+	rctxListA.URLParams.Add("id", clusterA.ID.String())
+	reqListA = reqListA.WithContext(context.WithValue(reqListA.Context(), chi.RouteCtxKey, rctxListA))
+
+	wListA := httptest.NewRecorder()
+	clusterHandlers.ListClusterNamespaces(wListA, reqListA)
+
+	assert.Equal(t, http.StatusOK, wListA.Code, "GET /clusters/cluster-a/namespaces should succeed")
+
+	var namespacesA []models.Namespace
+	err = json.Unmarshal(wListA.Body.Bytes(), &namespacesA)
+	require.NoError(t, err)
+	assert.Len(t, namespacesA, 1, "Cluster A should have exactly 1 namespace")
+	assert.Equal(t, "app-namespace", namespacesA[0].Name)
+	assert.Equal(t, clusterA.ID, *namespacesA[0].ClusterID)
+
+	// Test GET /clusters/{cluster-b}/namespaces
+	reqListB := httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterB.ID.String()+"/namespaces", nil)
+	rctxListB := chi.NewRouteContext()
+	rctxListB.URLParams.Add("id", clusterB.ID.String())
+	reqListB = reqListB.WithContext(context.WithValue(reqListB.Context(), chi.RouteCtxKey, rctxListB))
+
+	wListB := httptest.NewRecorder()
+	clusterHandlers.ListClusterNamespaces(wListB, reqListB)
+
+	assert.Equal(t, http.StatusOK, wListB.Code, "GET /clusters/cluster-b/namespaces should succeed")
+
+	var namespacesB []models.Namespace
+	err = json.Unmarshal(wListB.Body.Bytes(), &namespacesB)
+	require.NoError(t, err)
+	assert.Len(t, namespacesB, 1, "Cluster B should have exactly 1 namespace")
+	assert.Equal(t, "app-namespace", namespacesB[0].Name)
+	assert.Equal(t, clusterB.ID, *namespacesB[0].ClusterID)
+
+	// Verify namespace IDs are different despite same name
+	assert.NotEqual(t, namespacesA[0].ID, namespacesB[0].ID, "Namespaces with same name in different clusters should have different IDs")
+
+	t.Log("Multi-cluster secret publish test passed: secrets are properly isolated by cluster and API endpoints return correct namespaces")
 }
