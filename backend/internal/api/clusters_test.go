@@ -394,7 +394,7 @@ func TestListClusterNamespaces(t *testing.T) {
 		ID:            uuid.New(),
 		Name:          "devops",
 		KubeconfigRef: "/etc/kubeconfigs/devops.yaml",
-		Environment:   "prod",
+		Environment:   "production",
 	}
 	db.Create(&cluster)
 
