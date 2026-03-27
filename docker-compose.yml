@@ -34,7 +34,6 @@ services:
       AUTH_PROVIDER: mock
       JWT_SECRET: dev-secret-change-in-production
       GIT_REPO_PATH: /data/secrets-repo
-      SOPS_AGE_KEY_FILE: /keys/age.txt
       GIT_REPO_URL: ${GIT_REPO_URL:-}
       GIT_BRANCH: ${GIT_BRANCH:-main}
       GIT_AUTH_TYPE: ${GIT_AUTH_TYPE:-ssh}
@@ -43,10 +42,16 @@ services:
       GIT_SSH_KEY_PATH: /app/.ssh/id_rsa
       GIT_AUTHOR_NAME: Secret Manager Dev
       GIT_AUTHOR_EMAIL: dev@secret-manager.local
-      # SOPS configuration
+      # SOPS configuration - KMS
       SOPS_ENABLED: "true"
-      SOPS_ENCRYPT_TYPE: age
-      SOPS_AGE_KEY_PATH: /app/.age/keys.txt
+      SOPS_ENCRYPT_TYPE: kms
+      SOPS_KMS_KEY_ARN: ${SOPS_KMS_KEY_ARN}
+      # AWS Configuration for LocalStack
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://host.docker.internal:4566
+      AWS_EC2_METADATA_DISABLED: "true"
       # Kubernetes configuration
       K8S_KUBECONFIG: /app/.kube/config
       DRIFT_CHECK_INTERVAL: 5m
@@ -54,8 +59,6 @@ services:
     volumes:
       - ./backend:/app
       - ./dev-data/secrets-repo:/data/secrets-repo
-      - ./dev-data/age-key.txt:/keys/age.txt:ro
-      - ./dev-data/age-keys:/app/.age:ro
       - ./dev-data/ssh-keys:/app/.ssh:ro
       - ~/.kube:/app/.kube:ro
       - backend_cache:/go/pkg/mod

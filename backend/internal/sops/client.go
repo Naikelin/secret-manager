@@ -90,9 +90,12 @@ func (c *SOPSClient) EncryptFile(inputPath, outputPath string) error {
 
 	cmd := exec.Command("sops", args...)
 
-	// Set Age key file environment variable for encryption
+	// Set environment variables based on encryption type
 	if c.encryptType == "age" {
 		cmd.Env = append(os.Environ(), fmt.Sprintf("SOPS_AGE_KEY_FILE=%s", c.ageKeyPath))
+	} else if c.encryptType == "kms" {
+		// Pass AWS credentials for KMS operations
+		cmd.Env = os.Environ()
 	}
 
 	// Execute command
@@ -123,9 +126,12 @@ func (c *SOPSClient) DecryptFile(inputPath, outputPath string) error {
 
 	cmd := exec.Command("sops", args...)
 
-	// Set Age key file environment variable for decryption
+	// Set environment variables based on encryption type
 	if c.encryptType == "age" {
 		cmd.Env = append(os.Environ(), fmt.Sprintf("SOPS_AGE_KEY_FILE=%s", c.ageKeyPath))
+	} else if c.encryptType == "kms" {
+		// Pass AWS credentials for KMS operations
+		cmd.Env = os.Environ()
 	}
 
 	// Execute command
