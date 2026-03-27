@@ -57,11 +57,24 @@ This redirects to frontend with a JWT token for the specified user.
 | POST | `/auth/logout` | Logout (client-side) | No |
 | GET | `/auth/mock-callback` | Mock login (dev only) | No |
 
+### Clusters
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/clusters` | List all clusters | Yes (read) |
+| POST | `/clusters` | Create new cluster | Yes (admin) |
+| GET | `/clusters/{id}` | Get cluster by ID | Yes (read) |
+| DELETE | `/clusters/{id}` | Delete cluster | Yes (admin) |
+| GET | `/clusters/{id}/health` | Check cluster health | Yes (read) |
+| GET | `/clusters/{id}/namespaces` | List namespaces in cluster | Yes (read) |
+
+**Note**: Cluster endpoints enable management of multiple Kubernetes clusters. Each cluster requires a kubeconfig file in `K8S_KUBECONFIGS_DIR`.
+
 ### Namespaces
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/namespaces` | List accessible namespaces | Yes |
+| GET | `/namespaces` | List accessible namespaces (optionally filtered by cluster) | Yes |
 
 ### Secrets
 
@@ -121,6 +134,33 @@ This redirects to frontend with a JWT token for the specified user.
 | GET | `/health` | Health check | No |
 
 ## Example Workflows
+
+### Register a New Cluster
+
+```bash
+# 1. Login and get token
+TOKEN="your-jwt-token-here"
+
+# 2. Create cluster (admin only)
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  http://localhost:8080/api/v1/clusters \
+  -d '{
+    "name": "devops",
+    "environment": "production",
+    "kubeconfig_ref": "devops.yaml"
+  }'
+
+# 3. Verify cluster health
+CLUSTER_ID="<cluster-uuid>"
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/v1/clusters/$CLUSTER_ID/health
+
+# 4. List namespaces in cluster
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/api/v1/clusters/$CLUSTER_ID/namespaces
+```
 
 ### Create and Publish a Secret
 
@@ -322,9 +362,11 @@ Key configuration variables:
 - `GIT_REPO_URL`: Git repository URL for GitOps
 - `GIT_REPO_PATH`: Local path for Git repository
 - `SOPS_ENABLED`: Enable SOPS encryption (true/false)
-- `K8S_KUBECONFIG`: Path to Kubernetes config file
+- `K8S_KUBECONFIGS_DIR`: Directory containing cluster kubeconfig files (multi-cluster)
 - `DRIFT_CHECK_INTERVAL`: Interval for automatic drift checks (e.g., "5m")
 - `DRIFT_WEBHOOK_URL`: Webhook URL for drift notifications
+
+**Multi-Cluster Configuration**: The backend reads kubeconfig files from `K8S_KUBECONFIGS_DIR` and matches them to clusters registered in the database via the `kubeconfig_ref` field. Kubeconfigs should be mounted as Kubernetes Secrets in production deployments.
 
 ## Support
 

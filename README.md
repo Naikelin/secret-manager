@@ -6,6 +6,7 @@ GitOps-based Kubernetes Secret Management with SOPS encryption and FluxCD auto-s
 
 ## Features
 
+- **Multi-Cluster Support**: Manage secrets across multiple Kubernetes clusters from a single backend
 - **Staging Area Workflow**: Draft secrets in PostgreSQL before committing to Git
 - **SOPS Encryption**: Age encryption (dev) with KMS migration path (prod)
 - **FluxCD Integration**: Auto-sync secrets from Git to Kubernetes
@@ -85,6 +86,7 @@ make kind-down
 └─────────────┘      └──────────────┘      └──────────┘
                             │
                             ├─────▶ Git Repo (SOPS encrypted)
+                            │       clusters/{cluster}/namespaces/{ns}/secrets/
                             │              │
                             │              ▼
                             │         ┌─────────┐
@@ -92,8 +94,21 @@ make kind-down
                             │         └─────────┘
                             │              │
                             │              ▼
-                            └─────▶ Kubernetes Secrets
+                            └─────▶ Multiple K8s Clusters
+                                    (devops, integraciones, kyndryl, etc.)
 ```
+
+### Multi-Cluster Architecture
+
+Secret Manager uses a **cluster-first Git structure** to manage secrets across 6+ production Kubernetes clusters:
+
+- **Single Git Repository**: All clusters stored in one repo with isolated paths
+- **Cluster-First Path**: `clusters/{cluster}/namespaces/{ns}/secrets/`
+- **Client Pool**: `ClientManager` maintains thread-safe connections to all clusters
+- **Lazy Initialization**: Unreachable clusters don't block backend startup
+- **Health Monitoring**: Active tracking of cluster connectivity status
+
+Each cluster has its own kubeconfig mounted from Kubernetes Secrets, enabling centralized management without credential sprawl.
 
 ## Development Workflow
 
@@ -161,12 +176,14 @@ JWT_SECRET=dev-secret-change-in-production
 # Git
 GIT_REPO_PATH=/data/secrets-repo
 
-# Kubernetes
-K8S_KUBECONFIG=/root/.kube/config
+# Kubernetes (Multi-Cluster)
+K8S_KUBECONFIGS_DIR=/etc/kubeconfigs  # Directory containing cluster kubeconfig files
 
 # SOPS
 SOPS_AGE_KEY_FILE=/keys/age.txt
 ```
+
+**Multi-Cluster Setup**: Place kubeconfig files in `K8S_KUBECONFIGS_DIR` with filenames matching the cluster name (e.g., `devops.yaml`, `integraciones-dev.yaml`). Each kubeconfig is referenced by the `Cluster` model's `kubeconfig_ref` field.
 
 ### Frontend (`frontend/.env`)
 
@@ -325,9 +342,9 @@ ls -la dev-data/age-key.txt
 - [ ] Frontend secret management UI
 
 ### Phase 4: Production Ready
-- [ ] Azure AD authentication
-- [ ] KMS encryption (Azure Key Vault)
-- [ ] Multi-cluster support
+- [x] Azure AD authentication
+- [x] KMS encryption (Azure Key Vault)
+- [x] Multi-cluster support
 - [ ] Performance optimization
 
 ## License
